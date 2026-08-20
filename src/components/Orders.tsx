@@ -271,7 +271,6 @@ export default function Orders() {
     setOrders((prev) => prev.filter((o) => o.id !== id));
   }
 
-  // جلب الفحص بشكل مضمون يدعم أشكال مسميات العقول المتعددة
   async function viewOrderDetails(order: Order & { customers?: { name: string; phone?: string } }) {
     let examData: any = null;
 
@@ -291,7 +290,6 @@ export default function Orders() {
       examData = data;
     }
 
-    // محاولة بحث إضافية بالهاتف أو الاسم إذا كان جدول الفحوصات غير مرتبطة بـ customer_id بشكل مباشر
     if (!examData && order.customers?.name) {
       const { data } = await supabase
         .from('examinations')
@@ -320,7 +318,6 @@ export default function Orders() {
 
   const customerExams = form.customer_id ? exams.filter((e) => e.customer_id === form.customer_id) : [];
 
-  // Helper لجلب القياس مع دعم جميع الاحتمالات في أسماء الحقول
   const getVal = (obj: any, keys: string[]) => {
     if (!obj) return null;
     for (const k of keys) {
@@ -670,7 +667,14 @@ export default function Orders() {
 
             {/* الإيصال الشامل القابل للطباعة والمعاينة */}
             <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-              <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-3 mb-4">
+              
+              {/* هيدر الفاتورة مع اللوجو */}
+              <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-4 mb-4 flex flex-col items-center justify-center">
+                <img 
+                  src="/logo.png" 
+                  alt="اللوجو" 
+                  className="h-16 max-w-[200px] object-contain mb-2 print-logo" 
+                />
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">المركز الإيطالي للبصريات والعيادة الطبية</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">إيصال طلب وتصنيع نظارة</p>
               </div>
@@ -817,15 +821,13 @@ export default function Orders() {
         )}
       </Modal>
 
-      {/* التنسيقات المخصصة الحاكمة لإجبار الطباعة بكامل المحتوى */}
+      {/* التنسيقات المخصصة للطباعة */}
       <style>{`
         @media print {
-          /* إخفاء عناصر الموقع والكونتينر والنافذة العائمة */
           body * {
             visibility: hidden !important;
           }
           
-          /* توجيه الطباعة بالكامل لإظهار الإيصال فقط */
           .printable-receipt, .printable-receipt * {
             visibility: visible !important;
           }
@@ -842,6 +844,14 @@ export default function Orders() {
             color: black !important;
             border: none !important;
             box-shadow: none !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .print-logo {
+            display: block !important;
+            max-height: 70px !important;
+            margin-bottom: 10px !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
