@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Package, Plus, Search, Edit, Trash2, AlertTriangle, Barcode } from 'lucide-react';
 import {
   supabase,
@@ -35,6 +35,10 @@ export default function Inventory() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
 
+  // المراجع الخاصة بالتركيز التلقائي عند المسح
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from('inventory').select('*').order('name');
@@ -42,6 +46,15 @@ export default function Inventory() {
       setLoading(false);
     })();
   }, []);
+
+  // تركيز تلقائي على حقل الباركود فور فتح النافذة
+  useEffect(() => {
+    if (showModal) {
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 100);
+    }
+  }, [showModal]);
 
   const filtered = items.filter((i) => {
     const matchSearch =
@@ -53,7 +66,7 @@ export default function Inventory() {
   });
 
   function openNew() {
-    setForm({ ...emptyForm, barcode: generateBarcode() });
+    setForm({ ...emptyForm, barcode: '' }); // تفرغ لتصبح جاهزة لمسح القارئ
     setEditingId(null);
     setShowModal(true);
   }
@@ -73,6 +86,16 @@ export default function Inventory() {
     });
     setEditingId(item.id);
     setShowModal(true);
+  }
+
+  // التقاط مسح الباركود والانتقال لاسم المنتج تلقائياً
+  function handleBarcodeKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault(); // منع إرسال الفورم مبكراً
+      if (form.barcode.trim()) {
+        nameInputRef.current?.focus(); // الانتقال التلقائي إلى اسم المنتج
+      }
+    }
   }
 
   async function save() {
@@ -248,7 +271,15 @@ export default function Inventory() {
             <div className="flex gap-2">
               <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900">
                 <Barcode className="w-5 h-5 text-slate-400" />
-                <input type="text" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} className="flex-1 bg-transparent outline-none font-mono text-sm text-slate-700 dark:text-slate-200" />
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={form.barcode}
+                  onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+                  onKeyDown={handleBarcodeKeyDown}
+                  placeholder="امسح الباركود هنا..."
+                  className="flex-1 bg-transparent outline-none font-mono text-sm text-slate-700 dark:text-slate-200"
+                />
               </div>
               <button onClick={() => setForm({ ...form, barcode: generateBarcode() })} className="btn-secondary" type="button">
                 <Barcode className="w-4 h-4" /> توليد
@@ -259,7 +290,14 @@ export default function Inventory() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">اسم المنتج *</label>
-              <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" placeholder="اسم المنتج" />
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="input"
+                placeholder="اسم المنتج"
+              />
             </div>
             <div>
               <label className="label">الفئة</label>
