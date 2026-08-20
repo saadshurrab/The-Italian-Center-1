@@ -11,20 +11,22 @@ import {
 import { supabase, formatCurrency, ORDER_STATUS_LABELS } from '@/lib/supabase';
 import { StatCard, LoadingSpinner } from '@/components/ui';
 
+interface SaleRecord {
+  id?: string;
+  total?: number;
+  created_at: string;
+}
+
 interface OrderRecord {
   id: string;
   status: string;
-  total_amount: number;
-  amount_paid: number;
+  total_amount?: number;
+  total?: number;
+  amount_paid?: number;
+  paid_amount?: number;
+  paid?: number;
   created_at: string;
   customers?: { name: string } | null;
-}
-
-interface PaymentRecord {
-  id: string;
-  amount: number;
-  payment_type: string;
-  created_at: string;
 }
 
 export default function Dashboard() {
@@ -46,7 +48,12 @@ export default function Dashboard() {
     { id: string; status: string; total_amount: number; customer_name: string }[]
   >([]);
 
-  // دالة مقارنة التواريخ بالاعتماد على التوقيت المحلي للمستخدم
+  // استخراج المبلغ المدفوع بدقة من الطلبية
+  const getOrderPaidAmount = (o: OrderRecord) => {
+    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
+  };
+
+  // دالة مقارنة التواريخ حسب المنطقة الزمنية المحلية للمستخدم (تمنع مشاكل UTC)
   const isSameDay = (d1: Date, d2: Date) => {
     return (
       d1.getFullYear() === d2.getFullYear() &&
@@ -68,10 +75,9 @@ export default function Dashboard() {
       try {
         const now = new Date();
 
-        // جلب البيانات مع ربط جدول payments الخاص بالطلبيات
+        // جلب البيانات الأساسية من Supabase
         const [
           salesRes,
-          paymentsRes,
           ordersRes,
           inventoryRes,
           examsRes,
@@ -79,52 +85,50 @@ export default function Dashboard() {
           itemsRes
         ] = await Promise.all([
           supabase.from('sales').select('id, total, created_at'),
-          supabase.from('payments').select('id, amount, payment_type, created_at').eq('payment_type', 'income'),
-          supabase.from('orders').select('id, status, total_amount, amount_paid, created_at, customers(name)'),
+          supabase.from('orders').select('id, status, total_amount, total, amount_paid, paid_amount, paid, created_at, customers(name)'),
           supabase.from('inventory').select('id, name, quantity, reorder_level'),
           supabase.from('examinations').select('id, exam_date, created_at'),
           supabase.from('customers').select('id', { count: 'exact', head: true }),
-          supabase.from('order_items').select('item_name, quantity').order('quantity', { ascending: false }).limit(5)
+          supabase.from('sale_items').select('item_name, quantity').order('quantity', { ascending: false }).limit(5)
         ]);
 
-        const sales = salesRes.data || [];
-        const payments: PaymentRecord[] = paymentsRes.data || [];
+        const sales: SaleRecord[] = salesRes.data || [];
         const orders: OrderRecord[] = ordersRes.data || [];
 
-        // 1. حساب مبيعات المعرض المباشرة (جدول sales)
-        const directSalesToday = sales
-          .filter((s) => s.created_at && isSameDay(new Date(s.created_at), now))
-          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
-
-        const directSalesMonth = sales
+        // 1. حساب مبيعات المعرض المباشرة
+        const monthSalesTotal = sales
           .filter((s) => s.created_at && isSameMonth(new Date(s.created_at), now))
           .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-        // 2. حساب المقبوضات الفتلية للطلبيات (جدول payments المربوط بالطلبيات)
-        const orderPaymentsToday = payments
-          .filter((p) => p.created_at && isSameDay(new Date(p.created_at), now))
-          .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        const todaySalesTotal = sales
+          .filter((s) => s.created_at && isSameDay(new Date(s.created_at), now))
+          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-        const orderPaymentsMonth = payments
-          .filter((p) => p.created_at && isSameMonth(new Date(p.created_at), now))
-          .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        // 2. حساب مقبوضات الطلبيات (المقدمات / الدفعات)
+        const monthOrdersPaid = orders
+          .filter((o) => o.created_at && isSameMonth(new Date(o.created_at), now))
+          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // إجمالي المبيعات والمقبوضات الفتلية
-        const todayTotal = directSalesToday + orderPaymentsToday;
-        const monthTotal = directSalesMonth + orderPaymentsMonth;
+        const todayOrdersPaid = orders
+          .filter((o) => o.created_at && isSameDay(new Date(o.created_at), now))
+          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // 3. الطلبيات النشطة والمخزون والفحوصات
-        const activeOrders = orders.filter((o) => ['pending', 'in_lab', 'ready'].includes(o.status));
-        const lowStock = (inventoryRes.data || []).filter((i) => Number(i.quantity) <= Number(i.reorder_level));
+        // 3. الإجمالي المالي الموحد مع شاشة المحاسبة
+        const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
+        const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
+        // حساب الفحوصات والطلبيات النشطة والمخزون
         const todayExamsCount = (examsRes.data || []).filter((e) => {
           const date = e.exam_date || e.created_at;
           return date && isSameDay(new Date(date), now);
         }).length;
 
+        const activeOrders = orders.filter((o) => ['pending', 'in_lab', 'ready'].includes(o.status));
+        const lowStock = (inventoryRes.data || []).filter((i) => Number(i.quantity) <= Number(i.reorder_level));
+
         setStats({
-          todaySales: todayTotal,
-          monthSales: monthTotal,
+          todaySales: todayTotalRevenue,
+          monthSales: monthTotalRevenue,
           activeOrders: activeOrders.length,
           lowStock: lowStock.length,
           todayExams: todayExamsCount,
@@ -132,34 +136,34 @@ export default function Dashboard() {
         });
 
         // 4. رسم بياني لإيرادات آخر 7 أيام
-        const daysData = [];
+        const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
           const targetDate = new Date();
           targetDate.setDate(now.getDate() - i);
 
-          const dayDirect = sales
+          const daySales = sales
             .filter((s) => s.created_at && isSameDay(new Date(s.created_at), targetDate))
             .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-          const dayPayments = payments
-            .filter((p) => p.created_at && isSameDay(new Date(p.created_at), targetDate))
-            .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          const dayOrders = orders
+            .filter((o) => o.created_at && isSameDay(new Date(o.created_at), targetDate))
+            .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
           daysData.push({
             day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
-            amount: dayDirect + dayPayments,
+            amount: daySales + dayOrders,
           });
         }
         setRevenueData(daysData);
 
-        // الأكثر مبيعاً وقائمة الطلبيات النشطة
+        // تحديث باقي القوائم
         setTopItems((itemsRes.data || []).map((i) => ({ name: i.item_name, qty: Number(i.quantity) || 0 })));
         setLowStockItems(lowStock.slice(0, 5));
 
         const activeList = activeOrders.slice(0, 5).map((o) => ({
           id: o.id,
           status: o.status,
-          total_amount: Number(o.total_amount || 0),
+          total_amount: Number(o.total_amount ?? o.total ?? 0),
           customer_name: (Array.isArray(o.customers) ? o.customers[0]?.name : o.customers?.name) || 'عميل نقدي',
         }));
         setActiveOrdersList(activeList);
@@ -191,9 +195,10 @@ export default function Dashboard() {
 
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Revenue chart */}
         <div className="card p-6">
           <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">
-            إيرادات آخر 7 أيام (مبيعات + مقبوضات الطلبيات)
+            إيرادات آخر 7 أيام (مبيعات + مدفوعات طلبيات)
           </h3>
           <div className="flex items-end justify-between gap-2 h-48">
             {revenueData.map((d, i) => (
@@ -211,9 +216,10 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Top items */}
         <div className="card p-6">
           <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">
-            أكثر العناصر طلباً في التصنيع
+            أكثر المنتجات مبيعاً
           </h3>
           {topItems.length === 0 ? (
             <p className="text-sm text-slate-400 py-8 text-center">لا توجد بيانات بعد</p>
@@ -275,7 +281,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 mb-4">
             <Clock className="w-5 h-5 text-warning-500" />
             <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white">
-              الطلبيات النشطة (قيد التصنيع والتجهيز)
+              الطلبيات النشطة
             </h3>
           </div>
           {activeOrdersList.length === 0 ? (
