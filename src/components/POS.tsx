@@ -151,7 +151,7 @@ export default function POS() {
         throw saleErr;
       }
 
-      // 2. تجهيز عناصر السلة للإدراج ومنع إرسال قيم null مسببة للخطأ
+      // 2. تجهيز عناصر السلة للإدراج (بدون line_total لأنه عمود يُحسب تلقائياً)
       const saleItems = cart.map((c) => {
         const itemData: any = {
           sale_id: sale.id,
@@ -159,7 +159,6 @@ export default function POS() {
           barcode: c.barcode || '',
           quantity: Number(c.qty),
           unit_price: Number(c.price),
-          line_total: Number(c.price * c.qty),
         };
 
         if (c.inventory_id) {
