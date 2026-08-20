@@ -627,12 +627,19 @@ export default function POS() {
           <div>
             <div id="receipt-printable-content" className="p-6 bg-white text-slate-900 dir-rtl text-right border border-slate-200 rounded-xl">
               
-              {/* Header */}
+              {/* Header مع الشعار */}
               <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
-                <div>
-                  <h1 className="font-extrabold text-2xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
-                  <p className="text-xs text-slate-600 mt-1 font-medium">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
+                <div className="flex items-center gap-4">
+                  <img
+                    src="/logo.png"
+                    alt="المركز الإيطالي للبصريات"
+                    className="h-16 w-auto object-contain"
+                  />
+                  <div>
+                    <h1 className="font-extrabold text-2xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
+                    <p className="text-xs text-slate-600 mt-1 font-medium">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
+                  </div>
                 </div>
                 <div className="text-left text-xs text-slate-700 space-y-1">
                   <p><span className="font-bold text-slate-900">رقم الفاتورة:</span> #{receiptData.saleId.slice(0, 8).toUpperCase()}</p>
