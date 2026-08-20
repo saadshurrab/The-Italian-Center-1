@@ -122,8 +122,12 @@ export default function POS() {
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const discountNum = parseFloat(discount) || 0;
   const total = Math.max(0, subtotal - discountNum);
-  const paid = parseFloat(amountPaid) || 0;
-  const change = paymentMethod === 'cash' ? Math.max(0, paid - total) : 0;
+
+  // إذا أدخل المستخدم مبلغاً نأخذه، وإلا نعتبر أنه دفع المبلغ كاملاً تلقائياً
+  const actualPaid = paymentMethod === 'cash'
+    ? (amountPaid !== '' ? parseFloat(amountPaid) || 0 : total)
+    : total;
+  const change = paymentMethod === 'cash' ? Math.max(0, actualPaid - total) : 0;
 
   async function handleCheckout() {
     if (cart.length === 0) return;
@@ -140,16 +144,13 @@ export default function POS() {
           tax: 0,
           total,
           payment_method: paymentMethod,
-          amount_paid: paymentMethod === 'cash' ? paid : total,
+          amount_paid: actualPaid,
           change_due: change,
         })
         .select()
         .single();
 
-      if (saleErr) {
-        console.error('فشل إنشاء سجل المبيعات (Sales):', saleErr);
-        throw saleErr;
-      }
+      if (saleErr) throw saleErr;
 
       // 2. تجهيز عناصر السلة للإدراج (بدون line_total لأنه عمود يُحسب تلقائياً)
       const saleItems = cart.map((c) => {
@@ -173,15 +174,7 @@ export default function POS() {
         .from('sale_items')
         .insert(saleItems);
 
-      if (itemsErr) {
-        console.error('تفاصيل خطأ sale_items:', {
-          message: itemsErr.message,
-          details: itemsErr.details,
-          hint: itemsErr.hint,
-          code: itemsErr.code,
-        });
-        throw itemsErr;
-      }
+      if (itemsErr) throw itemsErr;
 
       // 4. تحديث الكميات في المخزون
       for (const item of cart) {
@@ -206,7 +199,7 @@ export default function POS() {
         discount: discountNum,
         total,
         paymentMethod,
-        amountPaid: paymentMethod === 'cash' ? paid : total,
+        amountPaid: actualPaid,
         change,
         customer: customer?.name || 'عميل نقدي',
         date: new Date().toISOString(),
@@ -219,7 +212,7 @@ export default function POS() {
       setAmountPaid('');
       setPaymentMethod('cash');
 
-      // إعادة تحميل المخزون لتحديث الشاشة
+      // إعادة تحميل المخزون
       const { data: newInv } = await supabase
         .from('inventory')
         .select('*')
@@ -229,9 +222,7 @@ export default function POS() {
 
     } catch (err: any) {
       console.error('Sale Processing Error:', err);
-      alert(
-        `حدث خطأ أثناء إتمام البيع:\n${err.message || 'يرجى التحقق من صحة البيانات أو قيود المفاتيح في Supabase'}`
-      );
+      alert(`حدث خطأ أثناء إتمام البيع:\n${err.message || 'يرجى التأكد من البيانات'}`);
     } finally {
       setProcessing(false);
     }
@@ -261,7 +252,7 @@ export default function POS() {
 
   return (
     <div>
-      {/* CSS الخاص بالطباعة لمنع مشاكل تقطيع وإخفاء الصفحة */}
+      {/* CSS الخاص بالطباعة بجعل الفاتورة ناصعة وممتدة بكامل عرض الصفحة */}
       <style>{`
         @media print {
           body * {
@@ -271,12 +262,12 @@ export default function POS() {
             visibility: visible !important;
           }
           #receipt-print-area {
-            position: fixed !important;
+            position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 80mm !important;
-            margin: 0 auto !important;
-            padding: 10px !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 20px !important;
             background: #fff !important;
             color: #000 !important;
             font-family: sans-serif !important;
@@ -448,7 +439,7 @@ export default function POS() {
 
             {paymentMethod === 'cash' && (
               <div>
-                <label className="label">المبلغ المدفوع</label>
+                <label className="label">المبلغ المدفوع (اتركه فارغاً إن تم دفع الإجمالي)</label>
                 <input
                   type="number"
                   value={amountPaid}
@@ -456,7 +447,7 @@ export default function POS() {
                   placeholder={total.toString()}
                   className="input text-left"
                 />
-                {paid > 0 && (
+                {actualPaid > total && (
                   <p className="text-sm text-accent-600 dark:text-accent-400 mt-1">
                     الباقي: {formatCurrency(change)}
                   </p>
@@ -493,38 +484,38 @@ export default function POS() {
       </Modal>
 
       {/* Receipt Modal & Printable Template */}
-      <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع" size="sm">
+      <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع" size="md">
         {receiptData && (
           <div>
-            <div id="receipt-print-area" className="p-4 bg-white text-slate-900 rounded-lg dir-rtl text-right font-sans">
-              <div className="text-center mb-4 pb-3 border-b border-dashed border-slate-300">
-                <h2 className="font-bold text-xl text-slate-900 mb-1">الرؤيا النقية للبصريات</h2>
-                <p className="text-xs text-slate-500">إيصال بيع رسمي</p>
+            <div id="receipt-print-area" className="p-6 bg-white text-slate-900 rounded-lg dir-rtl text-right font-sans border border-slate-200">
+              <div className="text-center mb-6 pb-4 border-b border-dashed border-slate-300">
+                <h2 className="font-bold text-2xl text-slate-900 mb-1">الرؤيا النقية للبصريات</h2>
+                <p className="text-sm text-slate-500">إيصال بيع رسمي</p>
                 <p className="text-xs text-slate-500 mt-1">{formatDateTime(receiptData.date)}</p>
                 <p className="text-xs text-slate-500">رقم الفاتورة: #{receiptData.saleId.slice(0, 8)}</p>
-                <p className="text-xs text-slate-600 font-medium mt-1">العميل: {receiptData.customer}</p>
+                <p className="text-sm text-slate-700 font-medium mt-2">العميل: {receiptData.customer}</p>
               </div>
 
-              <table className="w-full text-xs mb-4 border-collapse">
+              <table className="w-full text-sm mb-6 border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-300 text-slate-700">
-                    <th className="text-right py-1">الصنف</th>
-                    <th className="text-center py-1">العدد</th>
-                    <th className="text-left py-1">المجموع</th>
+                  <tr className="border-b-2 border-slate-200 text-slate-700">
+                    <th className="text-right py-2">الصنف</th>
+                    <th className="text-center py-2">العدد</th>
+                    <th className="text-left py-2">المجموع</th>
                   </tr>
                 </thead>
                 <tbody>
                   {receiptData.items.map((item: CartItem, i: number) => (
                     <tr key={i} className="border-b border-slate-100">
-                      <td className="py-1.5 font-medium">{item.name}</td>
-                      <td className="text-center py-1.5">{item.qty}</td>
-                      <td className="text-left py-1.5 font-bold">{formatCurrency(item.price * item.qty)}</td>
+                      <td className="py-2.5 font-medium">{item.name}</td>
+                      <td className="text-center py-2.5">{item.qty}</td>
+                      <td className="text-left py-2.5 font-bold">{formatCurrency(item.price * item.qty)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              <div className="border-t border-dashed border-slate-300 pt-3 space-y-1.5 text-xs">
+              <div className="border-t border-dashed border-slate-300 pt-4 space-y-2 text-sm">
                 <div className="flex justify-between text-slate-600">
                   <span>المجموع الفرعي:</span>
                   <span>{formatCurrency(receiptData.subtotal)}</span>
@@ -535,7 +526,7 @@ export default function POS() {
                     <span>-{formatCurrency(receiptData.discount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between font-bold text-sm text-slate-900 border-t pt-1 border-slate-200">
+                <div className="flex justify-between font-bold text-base text-slate-900 border-t pt-2 border-slate-200">
                   <span>الإجمالي:</span>
                   <span>{formatCurrency(receiptData.total)}</span>
                 </div>
@@ -555,7 +546,7 @@ export default function POS() {
                 )}
               </div>
 
-              <div className="text-center text-xs text-slate-500 mt-6 pt-3 border-t border-slate-200">
+              <div className="text-center text-xs text-slate-500 mt-8 pt-4 border-t border-slate-200">
                 <p>شكراً لزيارتكم — نتمنى لكم دوام الصحة</p>
               </div>
             </div>
