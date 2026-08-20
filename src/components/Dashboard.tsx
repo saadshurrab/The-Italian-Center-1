@@ -13,30 +13,6 @@ import {
 import { supabase, formatCurrency, ORDER_STATUS_LABELS } from '@/lib/supabase';
 import { StatCard, LoadingSpinner } from '@/components/ui';
 
-interface SaleRecord {
-  id?: string;
-  total?: number;
-  created_at: string;
-}
-
-interface OrderRecord {
-  id: string;
-  status: string;
-  total_amount?: number;
-  total?: number;
-  amount_paid?: number;
-  paid_amount?: number;
-  paid?: number;
-  created_at: string;
-  customers?: { name: string } | null;
-}
-
-interface ExpenseRecord {
-  id: string;
-  amount: number;
-  expense_date: string;
-}
-
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -59,12 +35,26 @@ export default function Dashboard() {
     { id: string; status: string; total_amount: number; customer_name: string }[]
   >([]);
 
-  // استخراج المبلغ المدفوع من الطلبية
-  const getOrderPaidAmount = (o: OrderRecord) => {
-    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
+  // استخراج المدفوعات وقيم المبيعات بأمان من أي مسمى حقل في قاعدة البيانات
+  const getOrderPaidAmount = (o: any) => {
+    if (!o) return 0;
+    const val = o.amount_paid ?? o.paid_amount ?? o.paid ?? o.deposit ?? o.down_payment ?? o.advance_payment ?? 0;
+    return Number(val) || 0;
   };
 
-  // دوال تحقق التواريخ بنفس آلية صفحة المحاسبة بالضبط
+  const getOrderTotalAmount = (o: any) => {
+    if (!o) return 0;
+    const val = o.total_amount ?? o.total ?? o.price ?? 0;
+    return Number(val) || 0;
+  };
+
+  const getSaleTotalAmount = (s: any) => {
+    if (!s) return 0;
+    const val = s.total ?? s.total_amount ?? s.amount ?? 0;
+    return Number(val) || 0;
+  };
+
+  // دوال مطابقة التواريخ بنفس آلية المحاسبة والصندوق
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -73,12 +63,14 @@ export default function Dashboard() {
   const isThisMonth = (dateStr?: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
     return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
   };
 
   const isToday = (dateStr?: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
     return (
       d.getFullYear() === currentYear &&
       d.getMonth() === currentMonth &&
@@ -89,6 +81,7 @@ export default function Dashboard() {
   const isSameDay = (dateStr: string, targetDate: Date) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
     return (
       d.getFullYear() === targetDate.getFullYear() &&
       d.getMonth() === targetDate.getMonth() &&
@@ -100,7 +93,7 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        // جلب البيانات الموحدة من جميع الجداول المطلوبة
+        // جلب عام وشامل لمنع أخطاء الأسماء المطابقة لجداول المحاسبة
         const [
           salesRes,
           ordersRes,
@@ -110,13 +103,11 @@ export default function Dashboard() {
           customersRes,
           itemsRes,
         ] = await Promise.all([
-          supabase.from('sales').select('id, total, created_at'),
-          supabase
-            .from('orders')
-            .select('id, status, total_amount, total, amount_paid, paid_amount, paid, created_at, customers(name)'),
-          supabase.from('expenses').select('id, amount, expense_date'),
-          supabase.from('inventory').select('id, name, quantity, reorder_level'),
-          supabase.from('examinations').select('id, exam_date, created_at'),
+          supabase.from('sales').select('*'),
+          supabase.from('orders').select('*, customers(name)'),
+          supabase.from('expenses').select('*'),
+          supabase.from('inventory').select('*'),
+          supabase.from('examinations').select('*'),
           supabase.from('customers').select('id', { count: 'exact', head: true }),
           supabase
             .from('sale_items')
@@ -125,20 +116,20 @@ export default function Dashboard() {
             .limit(5),
         ]);
 
-        const sales: SaleRecord[] = salesRes.data || [];
-        const orders: OrderRecord[] = ordersRes.data || [];
-        const expenses: ExpenseRecord[] = expensesRes.data || [];
+        const sales = salesRes.data || [];
+        const orders = ordersRes.data || [];
+        const expenses = expensesRes.data || [];
 
-        // 1. حساب مبيعات المعرض المباشرة
+        // 1. مبيعات المعرض المباشرة
         const monthSalesTotal = sales
           .filter((s) => isThisMonth(s.created_at))
-          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+          .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
 
         const todaySalesTotal = sales
           .filter((s) => isToday(s.created_at))
-          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+          .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
 
-        // 2. حساب مقبوضات الطلبيات
+        // 2. مقبوضات ومقدمات الطلبيات
         const monthOrdersPaid = orders
           .filter((o) => isThisMonth(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
@@ -147,26 +138,28 @@ export default function Dashboard() {
           .filter((o) => isToday(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // إجمالي الإيرادات المباشرة والمقبوضات (مطابق لصفحة المحاسبة)
+        // إجمالي المقبوضات (مبيعات + مقبوضات طلبات)
         const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
         const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
 
-        // 3. حساب المصروفات من جدول expenses
+        // 3. المصروفات من جدول expenses
         const monthExpensesTotal = expenses
-          .filter((e) => isThisMonth(e.expense_date))
+          .filter((e) => isThisMonth(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
         const todayExpensesTotal = expenses
-          .filter((e) => isToday(e.expense_date))
+          .filter((e) => isToday(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
         // 4. الفحوصات والمخزون والطلبيات النشطة
-        const todayExamsCount = (examsRes.data || []).filter((e) => {
-          const date = e.exam_date || e.created_at;
-          return isToday(date);
-        }).length;
+        const todayExamsCount = (examsRes.data || []).filter((e) =>
+          isToday(e.exam_date || e.created_at)
+        ).length;
 
-        const activeOrders = orders.filter((o) => ['pending', 'in_lab', 'ready'].includes(o.status));
+        const activeOrders = orders.filter((o) =>
+          ['pending', 'in_lab', 'ready'].includes(o.status)
+        );
+
         const lowStock = (inventoryRes.data || []).filter(
           (i) => Number(i.quantity) <= Number(i.reorder_level)
         );
@@ -182,7 +175,7 @@ export default function Dashboard() {
           totalCustomers: customersRes.count || 0,
         });
 
-        // 5. رسم بياني لإيرادات آخر 7 أيام (المبيعات + مقبوضات الطلبيات)
+        // 5. رسم بياني لإيرادات آخر 7 أيام
         const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
           const targetDate = new Date();
@@ -190,7 +183,7 @@ export default function Dashboard() {
 
           const daySales = sales
             .filter((s) => isSameDay(s.created_at, targetDate))
-            .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+            .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
 
           const dayOrders = orders
             .filter((o) => isSameDay(o.created_at, targetDate))
@@ -203,15 +196,30 @@ export default function Dashboard() {
         }
         setRevenueData(daysData);
 
-        // 6. قوائم الأكثر مبيعاً وتنبيهات المخزون والطلبيات
-        setTopItems((itemsRes.data || []).map((i) => ({ name: i.item_name, qty: Number(i.quantity) || 0 })));
-        setLowStockItems(lowStock.slice(0, 5));
+        // 6. القوائم الجانبية والتنبيهات
+        setTopItems(
+          (itemsRes.data || []).map((i) => ({
+            name: i.item_name,
+            qty: Number(i.quantity) || 0,
+          }))
+        );
+
+        setLowStockItems(
+          lowStock.slice(0, 5).map((i) => ({
+            id: i.id,
+            name: i.name,
+            quantity: Number(i.quantity) || 0,
+            reorder_level: Number(i.reorder_level) || 0,
+          }))
+        );
 
         const activeList = activeOrders.slice(0, 5).map((o) => ({
           id: o.id,
           status: o.status,
-          total_amount: Number(o.total_amount ?? o.total ?? 0),
-          customer_name: (Array.isArray(o.customers) ? o.customers[0]?.name : o.customers?.name) || 'عميل نقدي',
+          total_amount: getOrderTotalAmount(o),
+          customer_name:
+            (Array.isArray(o.customers) ? o.customers[0]?.name : o.customers?.name) ||
+            'عميل نقدي',
         }));
         setActiveOrdersList(activeList);
       } catch (error) {
@@ -229,8 +237,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* بطاقات المؤشرات المالية الرئيسية */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4">
+      {/* بطاقات المؤشرات المالية - متطابقة 100% مع المحاسبة */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="إيرادات اليوم"
           value={formatCurrency(stats.todaySales)}
@@ -250,7 +258,7 @@ export default function Dashboard() {
           color="error"
         />
         <StatCard
-          label="صافي إيراد الشهر"
+          label="صافي أرباح الشهر"
           value={formatCurrency(stats.monthSales - stats.monthExpenses)}
           icon={<ArrowUpCircle className="w-6 h-6 text-white" />}
           color="brand"
@@ -285,7 +293,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* الرسوم البيانية والأكثر مبيعاً */}
+      {/* الرسم البياني والأكثر مبيعاً */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card p-6">
           <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">
@@ -339,7 +347,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* جداول المتابعة السريعة */}
+      {/* جداول تنبيهات المخزون والطلبيات النشطة */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card p-6">
           <div className="flex items-center gap-2 mb-4">
