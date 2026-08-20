@@ -202,7 +202,6 @@ export default function Orders() {
     const total = form.items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.quantity) || 1), 0);
     const paid = Number(form.amount_paid) || 0;
 
-    // تم استبعاد balance و lens_details لمنع أخطاء قاعدة البيانات
     const orderPayload: Record<string, any> = {
       customer_id: form.customer_id,
       examination_id: form.examination_id && form.examination_id.trim() !== '' ? form.examination_id : null,
@@ -302,7 +301,7 @@ export default function Orders() {
   const customerExams = form.customer_id ? exams.filter((e) => e.customer_id === form.customer_id) : [];
 
   return (
-    <div>
+    <div className="orders-page-container">
       <div className="no-print">
         <PageHeader
           title="إدارة الطلبيات والتصنيع"
@@ -743,25 +742,31 @@ export default function Orders() {
             size: A4 portrait;
             margin: 10mm;
           }
-          body {
-            background: white !important;
-            color: black !important;
+          body * {
+            visibility: hidden !important;
           }
-          .no-print, nav, header, sidebar {
-            display: none !important;
+          .printable-receipt, .printable-receipt * {
+            visibility: visible !important;
           }
           .printable-receipt {
-            border: none !important;
-            box-shadow: none !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
+            border: none !important;
+            box-shadow: none !important;
             padding: 0 !important;
             margin: 0 !important;
             color: black !important;
+            background: white !important;
           }
           .printable-receipt * {
             color: black !important;
             background: transparent !important;
+          }
+          .no-print {
+            display: none !important;
           }
         }
       `}</style>
