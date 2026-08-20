@@ -301,7 +301,7 @@ export default function Orders() {
   const customerExams = form.customer_id ? exams.filter((e) => e.customer_id === form.customer_id) : [];
 
   return (
-    <div className="orders-page-container">
+    <div>
       <div className="no-print">
         <PageHeader
           title="إدارة الطلبيات والتصنيع"
@@ -645,7 +645,7 @@ export default function Orders() {
 
             <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
               <div className="text-center border-b pb-3 mb-4">
-                <h2 className="text-xl font-bold">مركز البصريات والعيادة الطبية</h2>
+                <h2 className="text-xl font-bold">المركز الإيطالي للبصريات والعيادة الطبية</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">إيصال طلب وتصنيع نظارة</p>
               </div>
 
@@ -710,7 +710,7 @@ export default function Orders() {
                   <span>{formatCurrency(viewOrder.total_amount)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>المدفوع نقداً/الدفعة المقادمة:</span>
+                  <span>المدفوع نقداً/الدفعة المقدمة:</span>
                   <span className="font-semibold text-accent-600">{formatCurrency(viewOrder.amount_paid)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
@@ -753,20 +753,12 @@ export default function Orders() {
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
-            max-width: 100% !important;
             border: none !important;
             box-shadow: none !important;
             padding: 0 !important;
             margin: 0 !important;
-            color: black !important;
             background: white !important;
-          }
-          .printable-receipt * {
             color: black !important;
-            background: transparent !important;
-          }
-          .no-print {
-            display: none !important;
           }
         }
       `}</style>
