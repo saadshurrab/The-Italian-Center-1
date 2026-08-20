@@ -21,9 +21,6 @@ export default function Dashboard() {
     todayExams: 0,
     totalCustomers: 0,
   });
-  const [recentSales, setRecentSales] = useState<
-    { id: string; total: number; payment_method: string; created_at: string }[]
-  >([]);
   const [revenueData, setRevenueData] = useState<{ day: string; amount: number }[]>([]);
   const [topItems, setTopItems] = useState<{ name: string; qty: number }[]>([]);
   const [lowStockItems, setLowStockItems] = useState<
@@ -39,52 +36,72 @@ export default function Dashboard() {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-      const [salesRes, monthSalesRes, ordersRes, inventoryRes, examsRes, customersRes] =
-        await Promise.all([
-          supabase.from('sales').select('total, payment_method, created_at').gte('created_at', todayStart),
-          supabase.from('sales').select('total').gte('created_at', monthStart),
-          supabase.from('orders').select('id, status, total_amount, customer_id, customers(name)').in('status', ['pending', 'in_lab', 'ready']),
-          supabase.from('inventory').select('id, name, quantity, reorder_level, category'),
-          supabase.from('examinations').select('id').gte('exam_date', todayStart.slice(0, 10)),
-          supabase.from('customers').select('id', { count: 'exact', head: true }),
-        ]);
+      // جلب المبيعات، دفوعات الطلبيات، المخزون، الفحوصات والعملاء بالتوازي
+      const [
+        todaySalesRes,
+        monthSalesRes,
+        todayOrderPaymentsRes,
+        monthOrderPaymentsRes,
+        ordersRes,
+        inventoryRes,
+        examsRes,
+        customersRes,
+      ] = await Promise.all([
+        supabase.from('sales').select('total, created_at').gte('created_at', todayStart),
+        supabase.from('sales').select('total').gte('created_at', monthStart),
+        supabase.from('order_payments').select('amount').gte('created_at', todayStart),
+        supabase.from('order_payments').select('amount').gte('created_at', monthStart),
+        supabase.from('orders').select('id, status, total_amount, customer_id, customers(name)').in('status', ['pending', 'in_lab', 'ready']),
+        supabase.from('inventory').select('id, name, quantity, reorder_level, category'),
+        supabase.from('examinations').select('id').gte('exam_date', todayStart.slice(0, 10)),
+        supabase.from('customers').select('id', { count: 'exact', head: true }),
+      ]);
 
-      const todayTotal = (salesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
-      const monthTotal = (monthSalesRes.data || []).reduce((s, r) => s + Number(r.total), 0);
+      // 1. حساب المقبوضات اليومية (مبيعات كاش/شبكة + مقدمات/دفوعات طلبيات اليوم)
+      const directSalesToday = (todaySalesRes.data || []).reduce((s, r) => s + Number(r.total || 0), 0);
+      const orderPaymentsToday = (todayOrderPaymentsRes.data || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      const totalTodayRevenue = directSalesToday + orderPaymentsToday;
+
+      // 2. حساب المقبوضات الشهرية (مبيعات + مقدمات طلبيات الشهر)
+      const directSalesMonth = (monthSalesRes.data || []).reduce((s, r) => s + Number(r.total || 0), 0);
+      const orderPaymentsMonth = (monthOrderPaymentsRes.data || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+      const totalMonthRevenue = directSalesMonth + orderPaymentsMonth;
+
       const lowStock = (inventoryRes.data || []).filter((i) => i.quantity <= i.reorder_level);
 
       setStats({
-        todaySales: todayTotal,
-        monthSales: monthTotal,
+        todaySales: totalTodayRevenue,
+        monthSales: totalMonthRevenue,
         activeOrders: (ordersRes.data || []).length,
         lowStock: lowStock.length,
         todayExams: (examsRes.data || []).length,
         totalCustomers: customersRes.count || 0,
       });
 
-      setRecentSales((salesRes.data || []).slice(-5).reverse());
-
-      // Revenue last 7 days
+      // 3. حساب إيرادات آخر 7 أيام (شاملة المبيعات والمقروضات/الدفوعات)
       const days: { day: string; amount: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
         const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).toISOString();
-        const { data } = await supabase
-          .from('sales')
-          .select('total')
-          .gte('created_at', dayStart)
-          .lt('created_at', dayEnd);
-        const amt = (data || []).reduce((s, r) => s + Number(r.total), 0);
+
+        const [daySales, dayPayments] = await Promise.all([
+          supabase.from('sales').select('total').gte('created_at', dayStart).lt('created_at', dayEnd),
+          supabase.from('order_payments').select('amount').gte('created_at', dayStart).lt('created_at', dayEnd),
+        ]);
+
+        const salesSum = (daySales.data || []).reduce((s, r) => s + Number(r.total || 0), 0);
+        const paymentsSum = (dayPayments.data || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+
         days.push({
           day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(d),
-          amount: amt,
+          amount: salesSum + paymentsSum,
         });
       }
       setRevenueData(days);
 
-      // Top selling items
+      // الأكثر مبيعاً
       const { data: itemsData } = await supabase
         .from('sale_items')
         .select('item_name, quantity')
@@ -94,7 +111,7 @@ export default function Dashboard() {
 
       setLowStockItems(lowStock.slice(0, 5));
 
-      // Active orders with customer names
+      // الطلبيات النشطة
       const ordersWithNames = (ordersRes.data || []).slice(0, 5).map((o: any) => ({
         id: o.id,
         status: o.status,
@@ -102,6 +119,7 @@ export default function Dashboard() {
         customer_name: o.customers?.name || '—',
       }));
       setActiveOrdersList(ordersWithNames);
+
       setLoading(false);
     })();
   }, []);
@@ -115,8 +133,8 @@ export default function Dashboard() {
     <div>
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
-        <StatCard label="مبيعات اليوم" value={formatCurrency(stats.todaySales)} icon={<DollarSign className="w-6 h-6 text-white" />} color="accent" />
-        <StatCard label="مبيعات الشهر" value={formatCurrency(stats.monthSales)} icon={<TrendingUp className="w-6 h-6 text-white" />} color="brand" />
+        <StatCard label="مقبوضات اليوم" value={formatCurrency(stats.todaySales)} icon={<DollarSign className="w-6 h-6 text-white" />} color="accent" />
+        <StatCard label="مقبوضات الشهر" value={formatCurrency(stats.monthSales)} icon={<TrendingUp className="w-6 h-6 text-white" />} color="brand" />
         <StatCard label="طلبيات نشطة" value={stats.activeOrders} icon={<ShoppingCart className="w-6 h-6 text-white" />} color="warning" />
         <StatCard label="تنبيه المخزون" value={stats.lowStock} icon={<AlertTriangle className="w-6 h-6 text-white" />} color="error" />
         <StatCard label="فحوصات اليوم" value={stats.todayExams} icon={<Eye className="w-6 h-6 text-white" />} color="brand" />
@@ -128,7 +146,7 @@ export default function Dashboard() {
         {/* Revenue chart */}
         <div className="card p-6">
           <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">
-            إيرادات آخر 7 أيام
+            إيرادات آخر 7 أيام (شاملة المقبوضات)
           </h3>
           <div className="flex items-end justify-between gap-2 h-48">
             {revenueData.map((d, i) => (
