@@ -82,7 +82,7 @@ export default function Accounting() {
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
         supabase.from('sales').select('id, total, payment_method, created_at').order('created_at', { ascending: false }),
-        supabase.from('orders').select('id, total_amount, total, amount_paid, paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
       ]);
 
       if (expRes.error) throw expRes.error;
@@ -104,62 +104,104 @@ export default function Accounting() {
     fetchData();
   }, []);
 
+  // دالة مساعدة لاستخراج المدفوع فعلياً من الطلبية مهما كان اسم الحقل بجدول Supabase
+  const getOrderPaidAmount = (o: OrderRecord) => {
+    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
+  };
+
+  // دالة مساعدة لاستخراج إجمالي قيمة الطلبية
+  const getOrderTotalAmount = (o: OrderRecord) => {
+    return Number(o.total_amount ?? o.total ?? 0);
+  };
+
+  // دالة تحقق من الانتماء للشهر الحالي بغض النظر عن الفروق الزمانية (Timezone)
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const currentDay = now.getDate();
+
+  const isThisMonth = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+  };
+
+  const isToday = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return (
+      d.getFullYear() === currentYear &&
+      d.getMonth() === currentMonth &&
+      d.getDate() === currentDay
+    );
+  };
 
   // 1. حساب مبيعات المعرض المباشرة
   const monthSalesTotal = sales
-    .filter((s) => s.created_at >= monthStart)
+    .filter((s) => isThisMonth(s.created_at))
     .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
   const todaySalesTotal = sales
-    .filter((s) => s.created_at >= todayStart)
+    .filter((s) => isToday(s.created_at))
     .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-  // 2. حساب إجمالي قيم الطلبيات (المبلغ الكلي لكل طلبية)
-  const monthOrdersTotalAmount = orders
-    .filter((o) => o.created_at >= monthStart)
-    .reduce((sum, o) => sum + Number(o.total_amount ?? o.total ?? 0), 0);
-
-  // 3. حساب المقبوضات الفعلية المدفوعة من الطلبيات
+  // 2. حساب المقبوضات الفعلية والمدفوعات المقدمة للطلبيات
   const monthOrdersPaid = orders
-    .filter((o) => o.created_at >= monthStart)
-    .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
+    .filter((o) => isThisMonth(o.created_at))
+    .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
   const todayOrdersPaid = orders
-    .filter((o) => o.created_at >= todayStart)
-    .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
+    .filter((o) => isToday(o.created_at))
+    .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-  // 4. المجموع الإجمالي للإيرادات المقبوضة (المبيعات + مدفوعات الطلبيات)
+  // 3. إجمالي قيم الطلبيات الإجمالية (شامل المتبقي)
+  const monthOrdersTotalAmount = orders
+    .filter((o) => isThisMonth(o.created_at))
+    .reduce((sum, o) => sum + getOrderTotalAmount(o), 0);
+
+  // 4. المجموع الإجمالي الفعلي المقبوض (مبيعات المعرض + مقبوضات الطلبيات)
   const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
   const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
-  // المصاريف
+  // 5. المصاريف
   const monthExpensesTotal = expenses
-    .filter((e) => e.expense_date >= monthStart.split('T')[0])
+    .filter((e) => isThisMonth(e.expense_date))
     .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
   const todayExpensesTotal = expenses
-    .filter((e) => e.expense_date >= todayStart.split('T')[0])
+    .filter((e) => isToday(e.expense_date))
     .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-  // صافي الأرباح
+  // 6. صافي الأرباح (الإيرادات الكلية - المصاريف)
   const monthNetProfit = monthTotalRevenue - monthExpensesTotal;
   const todayNetProfit = todayTotalRevenue - todayExpensesTotal;
 
-  // تجميع المبيعات حسب طرق الدفع
-  const paymentStats = [...sales, ...orders].reduce(
-    (acc, item) => {
-      const method = item.payment_method || 'cash';
-      const amount = Number(item.amount_paid ?? item.paid_amount ?? item.paid ?? item.total ?? 0);
-      if (method === 'cash') acc.cash += amount;
-      else if (method === 'card') acc.card += amount;
-      else if (method === 'transfer') acc.transfer += amount;
-      return acc;
-    },
-    { cash: 0, card: 0, transfer: 0 }
-  );
+  // 7. تجميع المبيعات والمقبوضات من الأقسام المباشرة والطلبيات حسب طريقة الدفع
+  const paymentStats = {
+    cash: 0,
+    card: 0,
+    transfer: 0,
+  };
+
+  // إضافة المبيعات المباشرة
+  sales.forEach((s) => {
+    if (!isThisMonth(s.created_at)) return;
+    const method = s.payment_method || 'cash';
+    const amount = Number(s.total) || 0;
+    if (method === 'cash') paymentStats.cash += amount;
+    else if (method === 'card') paymentStats.card += amount;
+    else if (method === 'transfer') paymentStats.transfer += amount;
+  });
+
+  // إضافة مدفوعات الطلبيات
+  orders.forEach((o) => {
+    if (!isThisMonth(o.created_at)) return;
+    const method = o.payment_method || 'cash';
+    const amount = getOrderPaidAmount(o);
+    if (method === 'cash') paymentStats.cash += amount;
+    else if (method === 'card') paymentStats.card += amount;
+    else if (method === 'transfer') paymentStats.transfer += amount;
+  });
 
   const handleSaveExpense = async () => {
     if (!expenseForm.amount || Number(expenseForm.amount) <= 0) {
