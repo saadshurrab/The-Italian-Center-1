@@ -11,6 +11,8 @@ import {
   Moon,
   Sun,
   Glasses,
+  Menu, // تم إضافة أيقونة القائمة للشاشات الصغيرة
+  LucideIcon,
 } from 'lucide-react';
 import Dashboard from '@/components/Dashboard';
 import POS from '@/components/POS';
@@ -31,7 +33,13 @@ export type ViewId =
   | 'employees'
   | 'customers';
 
-const NAV_ITEMS: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] = [
+interface NavItem {
+  id: ViewId;
+  label: string;
+  icon: LucideIcon;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
   { id: 'pos', label: 'الكاشير والباركود', icon: ShoppingCart },
   { id: 'examinations', label: 'الفحوصات والأرشيف', icon: Eye },
@@ -44,9 +52,12 @@ const NAV_ITEMS: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] =
 
 function useTheme() {
   const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('theme');
-    if (saved) return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
   });
 
   useEffect(() => {
@@ -62,10 +73,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { dark, toggle } = useTheme();
 
-  const current = NAV_ITEMS.find((n) => n.id === view)!;
+  // جلب الخيار الحالي مع حماية من الأخطاء
+  const current = NAV_ITEMS.find((n) => n.id === view) || NAV_ITEMS[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex" dir="rtl">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex text-slate-900 dark:text-slate-100" dir="rtl">
       {/* Sidebar */}
       <aside
         className={`fixed lg:static inset-y-0 right-0 z-50 w-64 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-300 ${
@@ -79,7 +91,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="font-display font-bold text-slate-800 dark:text-white text-sm leading-tight">
-              المركز الإيطالي
+              الرؤية النقية
             </h1>
             <p className="text-xs text-slate-400">للبصريات</p>
           </div>
@@ -138,8 +150,9 @@ export default function App() {
             <button
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-label="فتح القائمة"
             >
-              <LayoutDashboard className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+              <Menu className="w-5 h-5 text-slate-600 dark:text-slate-300" />
             </button>
             <h2 className="font-display font-bold text-lg text-slate-800 dark:text-white">
               {current.label}
@@ -154,7 +167,7 @@ export default function App() {
               }).format(new Date())}
             </span>
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white font-bold text-sm">
-              إ
+              ر
             </div>
           </div>
         </header>
