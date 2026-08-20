@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ClipboardList, Plus, Search, Trash2, Edit, Eye, Clock, CheckCircle, FlaskConical, Package } from 'lucide-react';
+import { ClipboardList, Plus, Search, Trash2, Edit, Eye, Clock, CheckCircle, FlaskConical, Package, Printer } from 'lucide-react';
 import {
   supabase,
   formatCurrency,
@@ -123,7 +123,6 @@ export default function Orders() {
     if (editingOrder) {
       const { error } = await supabase.from('orders').update({ ...orderPayload, updated_at: new Date().toISOString() }).eq('id', editingOrder.id);
       if (error) { alert('خطأ: ' + error.message); return; }
-      // Delete old items and re-insert
       await supabase.from('order_items').delete().eq('order_id', editingOrder.id);
     } else {
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
@@ -166,102 +165,108 @@ export default function Orders() {
     setViewOrder({ ...order, order_items: items || [] });
   }
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   if (loading) return <LoadingSpinner />;
 
   const customerExams = form.customer_id ? exams.filter((e) => e.customer_id === form.customer_id) : [];
 
   return (
     <div>
-      <PageHeader
-        title="طلبيات العملاء"
-        subtitle="متابعة دورة حياة الطلبات من الاستلام حتى التسليم"
-        action={
-          <button onClick={openNew} className="btn-primary">
-            <Plus className="w-4 h-4" /> طلب جديد
-          </button>
-        }
-      />
+      <div className="no-print">
+        <PageHeader
+          title="طلبيات العملاء"
+          subtitle="متابعة دورة حياة الطلبات من الاستلام حتى التسليم"
+          action={
+            <button onClick={openNew} className="btn-primary">
+              <Plus className="w-4 h-4" /> طلب جديد
+            </button>
+          }
+        />
 
-      {/* Filters */}
-      <div className="card p-4 mb-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="w-5 h-5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم العميل..." className="input pr-10" />
+        {/* Filters */}
+        <div className="card p-4 mb-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="w-5 h-5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث باسم العميل..." className="input pr-10" />
+            </div>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="input sm:w-48">
+              <option value="all">كل الحالات</option>
+              {STATUS_FLOW.map((s) => (
+                <option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>
+              ))}
+            </select>
           </div>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="input sm:w-48">
-            <option value="all">كل الحالات</option>
-            {STATUS_FLOW.map((s) => (
-              <option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>
-            ))}
-          </select>
         </div>
-      </div>
 
-      {/* Orders grid */}
-      {filtered.length === 0 ? (
-        <div className="card">
-          <EmptyState message="لا توجد طلبيات" icon={<ClipboardList className="w-10 h-10" />} />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filtered.map((order) => {
-            const Icon = STATUS_ICONS[order.status];
-            return (
-              <div key={order.id} className="card card-hover p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
-                      <Icon className="w-5 h-5 text-slate-500" />
+        {/* Orders grid */}
+        {filtered.length === 0 ? (
+          <div className="card">
+            <EmptyState message="لا توجد طلبيات" icon={<ClipboardList className="w-10 h-10" />} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {filtered.map((order) => {
+              const Icon = STATUS_ICONS[order.status];
+              return (
+                <div key={order.id} className="card card-hover p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                        <Icon className="w-5 h-5 text-slate-500" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{order.customers?.name || '—'}</p>
+                        <p className="text-xs text-slate-400">{formatDate(order.created_at)}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-slate-700 dark:text-slate-200">{order.customers?.name || '—'}</p>
-                      <p className="text-xs text-slate-400">{formatDate(order.created_at)}</p>
-                    </div>
+                    <Badge text={ORDER_STATUS_LABELS[order.status]} color={STATUS_COLORS[order.status]} />
                   </div>
-                  <Badge text={ORDER_STATUS_LABELS[order.status]} color={STATUS_COLORS[order.status]} />
-                </div>
 
-                <div className="flex items-center justify-between mb-3 text-sm">
-                  <span className="text-slate-500 dark:text-slate-400">الإجمالي: <span className="font-bold text-slate-700 dark:text-slate-200">{formatCurrency(order.total_amount)}</span></span>
-                  <span className="text-slate-500 dark:text-slate-400">المتبقي: <span className={`font-bold ${order.balance > 0 ? 'text-error-600 dark:text-error-400' : 'text-accent-600 dark:text-accent-400'}`}>{formatCurrency(order.balance)}</span></span>
-                </div>
+                  <div className="flex items-center justify-between mb-3 text-sm">
+                    <span className="text-slate-500 dark:text-slate-400">الإجمالي: <span className="font-bold text-slate-700 dark:text-slate-200">{formatCurrency(order.total_amount)}</span></span>
+                    <span className="text-slate-500 dark:text-slate-400">المتبقي: <span className={`font-bold ${order.balance > 0 ? 'text-error-600 dark:text-error-400' : 'text-accent-600 dark:text-accent-400'}`}>{formatCurrency(order.balance)}</span></span>
+                  </div>
 
-                {/* Status flow buttons */}
-                <div className="flex items-center gap-1 mb-3">
-                  {STATUS_FLOW.map((s, i) => (
-                    <button
-                      key={s}
-                      onClick={() => updateStatus(order, s)}
-                      className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
-                        order.status === s
-                          ? 'bg-brand-600 text-white'
-                          : STATUS_FLOW.indexOf(order.status) >= i
-                          ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
-                      }`}
-                    >
-                      {ORDER_STATUS_LABELS[s]}
+                  {/* Status flow buttons */}
+                  <div className="flex items-center gap-1 mb-3">
+                    {STATUS_FLOW.map((s, i) => (
+                      <button
+                        key={s}
+                        onClick={() => updateStatus(order, s)}
+                        className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          order.status === s
+                            ? 'bg-brand-600 text-white'
+                            : STATUS_FLOW.indexOf(order.status) >= i
+                            ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                        {ORDER_STATUS_LABELS[s]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1 border-t border-slate-100 dark:border-slate-700 pt-3">
+                    <button onClick={() => viewOrderDetails(order)} className="btn-ghost flex-1 text-xs">
+                      <Eye className="w-4 h-4" /> عرض
                     </button>
-                  ))}
+                    <button onClick={() => openEdit(order)} className="btn-ghost flex-1 text-xs">
+                      <Edit className="w-4 h-4" /> تعديل
+                    </button>
+                    <button onClick={() => deleteOrder(order.id)} className="btn-ghost text-error-500 text-xs">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-1 border-t border-slate-100 dark:border-slate-700 pt-3">
-                  <button onClick={() => viewOrderDetails(order)} className="btn-ghost flex-1 text-xs">
-                    <Eye className="w-4 h-4" /> عرض
-                  </button>
-                  <button onClick={() => openEdit(order)} className="btn-ghost flex-1 text-xs">
-                    <Edit className="w-4 h-4" /> تعديل
-                  </button>
-                  <button onClick={() => deleteOrder(order.id)} className="btn-ghost text-error-500 text-xs">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* New/Edit modal */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editingOrder ? 'تعديل الطلب' : 'طلب جديد'} size="lg">
@@ -333,53 +338,111 @@ export default function Orders() {
         </div>
       </Modal>
 
-      {/* View order */}
-      <Modal open={!!viewOrder} onClose={() => setViewOrder(null)} title="تفاصيل الطلب" size="md">
+      {/* View & Print Modal */}
+      <Modal open={!!viewOrder} onClose={() => setViewOrder(null)} title="تفاصيل وإيصال الطلب" size="md">
         {viewOrder && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold text-slate-800 dark:text-white">{viewOrder.customers?.name || '—'}</p>
-                <p className="text-xs text-slate-400">{formatDateTime(viewOrder.created_at)}</p>
-              </div>
-              <Badge text={ORDER_STATUS_LABELS[viewOrder.status]} color={STATUS_COLORS[viewOrder.status]} />
+          <div>
+            <div className="no-print flex justify-end mb-4">
+              <button onClick={handlePrint} className="btn-primary flex items-center gap-2">
+                <Printer className="w-4 h-4" /> طباعة الإيصال
+              </button>
             </div>
 
-            {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
-              <div className="card p-3 bg-slate-50 dark:bg-slate-700/30">
-                {viewOrder.order_items.map((item: any, i: number) => (
-                  <div key={i} className="flex justify-between py-2 border-b border-slate-200 dark:border-slate-600 last:border-0 text-sm">
-                    <span className="text-slate-700 dark:text-slate-200">{item.item_name} ({item.item_type}) × {item.quantity}</span>
-                    <span className="font-medium text-slate-600 dark:text-slate-300">{formatCurrency(item.line_total)}</span>
-                  </div>
-                ))}
+            {/* Receipt Content Area */}
+            <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+              <div className="text-center border-b pb-4 mb-4">
+                <h2 className="text-xl font-bold">المركز الإيطالي للبصريات</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">إيصال طلبيّة بيع</p>
               </div>
-            ) : (
-              <p className="text-sm text-slate-400 text-center py-4">لا توجد عناصر</p>
-            )}
 
-            <div className="flex justify-between font-bold border-t border-slate-200 dark:border-slate-700 pt-3">
-              <span>الإجمالي</span>
-              <span className="text-brand-600 dark:text-brand-400">{formatCurrency(viewOrder.total_amount)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">المدفوع</span>
-              <span className="text-accent-600 dark:text-accent-400">{formatCurrency(viewOrder.amount_paid)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">المتبقي</span>
-              <span className="text-error-600 dark:text-error-400">{formatCurrency(viewOrder.balance)}</span>
-            </div>
-
-            {viewOrder.notes && (
-              <div className="card p-3 bg-slate-50 dark:bg-slate-700/30">
-                <p className="text-xs text-slate-400 mb-1">ملاحظات:</p>
-                <p className="text-sm text-slate-700 dark:text-slate-200">{viewOrder.notes}</p>
+              <div className="grid grid-cols-2 gap-2 text-xs mb-4 bg-slate-50 dark:bg-slate-700/50 p-3 rounded">
+                <div><span className="text-slate-500">العميل:</span> <strong>{viewOrder.customers?.name || '—'}</strong></div>
+                <div><span className="text-slate-500">التاريخ:</span> <strong>{formatDate(viewOrder.created_at)}</strong></div>
+                <div><span className="text-slate-500">رقم الطلب:</span> <strong>#{viewOrder.id.slice(0, 8)}</strong></div>
+                <div><span className="text-slate-500">الحالة:</span> <strong>{ORDER_STATUS_LABELS[viewOrder.status]}</strong></div>
               </div>
-            )}
+
+              {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
+                <table className="w-full text-right text-xs mb-4 border-collapse">
+                  <thead>
+                    <tr className="border-b text-slate-500">
+                      <th className="py-2">العنصر</th>
+                      <th className="py-2 text-center">العدد</th>
+                      <th className="py-2 text-left">الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewOrder.order_items.map((item: any, i: number) => (
+                      <tr key={i} className="border-b border-slate-100 dark:border-slate-700">
+                        <td className="py-2">{item.item_name} <span className="text-slate-400">({item.item_type})</span></td>
+                        <td className="py-2 text-center">{item.quantity}</td>
+                        <td className="py-2 text-left">{formatCurrency(item.line_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="text-xs text-slate-400 text-center py-3">لا توجد عناصر مسجلة</p>
+              )}
+
+              <div className="border-t pt-3 text-xs space-y-1">
+                <div className="flex justify-between font-bold text-sm">
+                  <span>المجموع الإجمالي:</span>
+                  <span>{formatCurrency(viewOrder.total_amount)}</span>
+                </div>
+                <div className="flex justify-between text-slate-500">
+                  <span>المدفوع:</span>
+                  <span>{formatCurrency(viewOrder.amount_paid)}</span>
+                </div>
+                <div className="flex justify-between text-slate-500">
+                  <span>المتبقي:</span>
+                  <span className={viewOrder.balance > 0 ? 'text-red-500 font-semibold' : ''}>{formatCurrency(viewOrder.balance)}</span>
+                </div>
+              </div>
+
+              {viewOrder.notes && (
+                <div className="mt-4 pt-2 border-t text-xs text-slate-500">
+                  <span className="font-semibold">ملاحظات:</span> {viewOrder.notes}
+                </div>
+              )}
+
+              <div className="text-center text-[10px] text-slate-400 mt-6 border-t pt-2">
+                شكراً لزيارتكم - يرجى الاحتفاظ بالإيصال
+              </div>
+            </div>
           </div>
         )}
       </Modal>
+
+      {/* CSS Rules for Printing */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+          body {
+            background: white !important;
+            color: black !important;
+          }
+          .no-print, nav, header, sidebar {
+            display: none !important;
+          }
+          .printable-receipt {
+            border: none !important;
+            box-shadow: none !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            color: black !important;
+          }
+          .printable-receipt * {
+            color: black !important;
+            background: transparent !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
