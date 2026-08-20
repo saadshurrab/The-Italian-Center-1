@@ -1,29 +1,42 @@
 import { useEffect, useState } from 'react';
-import { Wallet, Plus, Search, Trash2, TrendingUp, TrendingDown, DollarSign, Calendar } from 'lucide-react';
 import {
-  supabase,
-  formatCurrency,
-  formatDate,
-  EXPENSE_LABELS,
-  PAYMENT_LABELS,
-  type Expense,
-  type ExpenseCategory,
-  type CashRegister,
-  type Employee,
-} from '@/lib/supabase';
-import { PageHeader, Modal, Badge, LoadingSpinner, EmptyState, StatCard } from '@/components/ui';
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  Calendar,
+  CreditCard,
+  Wallet,
+  ArrowUpRight,
+  ArrowDownRight,
+  Plus,
+  Search,
+  Filter,
+} from 'lucide-react';
+import { supabase, formatCurrency, formatDate, PAYMENT_LABELS } from '@/lib/supabase';
+import { PageHeader, Modal, Badge, LoadingSpinner, EmptyState } from '@/components/ui';
 
-const EXPENSE_CATS = Object.keys(EXPENSE_LABELS) as ExpenseCategory[];
-
-interface SaleRecord {
-  id?: string;
-  total: number;
+interface Expense {
+  id: string;
+  category: string;
+  amount: number;
+  description: string;
   payment_method: string;
-  created_at: string;
+  expense_date: string;
+}
+
+interface CashRegister {
+  id: string;
+  opening_balance: number;
+  closing_balance: number;
+  total_in: number;
+  total_out: number;
+  notes: string;
+  register_date: string;
 }
 
 interface OrderRecord {
-  id?: string;
+  id: string;
+  amount_paid?: number;
   paid_amount?: number;
   paid?: number;
   payment_method?: string;
@@ -32,52 +45,55 @@ interface OrderRecord {
 
 export default function Accounting() {
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'cash' | 'expenses'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'expenses' | 'cash'>('overview');
+
+  // البيانات المالية
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [cashEntries, setCashEntries] = useState<CashRegister[]>([]);
-  const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [cashRegisters, setCashRegisters] = useState<CashRegister[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [search, setSearch] = useState('');
-  const [filterCat, setFilterCat] = useState<string>('all');
+
+  // الفلاتر ونماذج الإدخال
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
+  const [expenseSearch, setExpenseSearch] = useState('');
 
   const [expenseForm, setExpenseForm] = useState({
-    expense_date: new Date().toISOString().slice(0, 10),
-    category: 'rent' as ExpenseCategory,
-    description: '',
+    category: 'مشتريات وبضاعة',
     amount: '',
-    payment_method: 'cash' as 'cash' | 'card' | 'transfer',
+    description: '',
+    payment_method: 'cash',
+    expense_date: new Date().toISOString().split('T')[0],
   });
 
   const [cashForm, setCashForm] = useState({
-    register_date: new Date().toISOString().slice(0, 10),
     opening_balance: '',
-    cash_in: '',
-    cash_out: '',
     closing_balance: '',
     notes: '',
-    employee_id: '',
+    register_date: new Date().toISOString().split('T')[0],
   });
 
   const fetchData = async () => {
+    setLoading(true);
     try {
-      const [expRes, cashRes, salesRes, ordersRes, empRes] = await Promise.all([
+      const [expRes, cashRes, salesRes, ordersRes] = await Promise.all([
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
         supabase.from('sales').select('total, payment_method, created_at').order('created_at', { ascending: false }),
-        supabase.from('orders').select('paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
-        supabase.from('employees').select('*').order('name'),
+        // جلب الحقول المناسبة بما فيها amount_paid للربط الدقيق مع ملف الطلبيات
+        supabase.from('orders').select('id, amount_paid, paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
       ]);
 
+      if (expRes.error) throw expRes.error;
+      if (cashRes.error) throw cashRes.error;
+
       setExpenses(expRes.data || []);
-      setCashEntries(cashRes.data || []);
+      setCashRegisters(cashRes.data || []);
       setSales(salesRes.data || []);
       setOrders(ordersRes.data || []);
-      setEmployees(empRes.data || []);
-    } catch (err) {
-      console.error('Error fetching accounting data:', err);
+    } catch (error: any) {
+      console.error('خطأ في جلب البيانات المالية:', error);
+      alert('حدث خطأ أثناء تحميل البيانات: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -87,330 +103,492 @@ export default function Accounting() {
     fetchData();
   }, []);
 
-  // تحديد بداية اليوم وبداية الشهر بالوقيت المحلي
+  // حساب النطاقات الزمنية (اليوم والشهر الحالي)
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-  // حساب مبيعات جدول sales
-  const monthSalesCount = sales
+  // حساب المبيعات والمدفوعات
+  const monthSalesTotal = sales
     .filter((s) => s.created_at >= monthStart)
-    .reduce((sum, s) => sum + Number(s.total || 0), 0);
+    .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-  const todaySalesCount = sales
+  const todaySalesTotal = sales
     .filter((s) => s.created_at >= todayStart)
-    .reduce((sum, s) => sum + Number(s.total || 0), 0);
+    .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-  // حساب مدفوعات الطلبيات والتصنيع (الـ 200 شيكل والمدفوعات الأخرى)
+  // حساب المقبوضات الفعلية من الطلبيات (تراعي جميع تسميات الحقول الممكنة)
   const monthOrdersPaid = orders
     .filter((o) => o.created_at >= monthStart)
-    .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
+    .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
 
   const todayOrdersPaid = orders
     .filter((o) => o.created_at >= todayStart)
-    .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
+    .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
 
-  // إجمالي المقبوضات (المبيعات + مدفوعات الطلبيات)
-  const monthSales = monthSalesCount + monthOrdersPaid;
-  const todaySales = todaySalesCount + todayOrdersPaid;
+  // إجمالي الإيرادات
+  const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
+  const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
-  const monthExpenses = expenses
-    .filter((e) => e.expense_date >= monthStart.slice(0, 10))
-    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+  // المصاريف
+  const monthExpensesTotal = expenses
+    .filter((e) => e.expense_date >= monthStart.split('T')[0])
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-  const profit = monthSales - monthExpenses;
+  const todayExpensesTotal = expenses
+    .filter((e) => e.expense_date >= todayStart.split('T')[0])
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-  const filteredExpenses = expenses.filter((e) => {
-    const matchSearch = (e.description || '').includes(search) || (EXPENSE_LABELS[e.category] || '').includes(search);
-    const matchCat = filterCat === 'all' || e.category === filterCat;
-    return matchSearch && matchCat;
-  });
+  // صافي الأرباح
+  const monthNetProfit = monthTotalRevenue - monthExpensesTotal;
+  const todayNetProfit = todayTotalRevenue - todayExpensesTotal;
 
-  async function saveExpense() {
-    if (!expenseForm.amount) { alert('الرجاء إدخال المبلغ'); return; }
-    const { error } = await supabase.from('expenses').insert({
-      expense_date: expenseForm.expense_date,
-      category: expenseForm.category,
-      description: expenseForm.description || null,
-      amount: parseFloat(expenseForm.amount),
-      payment_method: expenseForm.payment_method,
-    });
-    if (error) { alert('خطأ: ' + error.message); return; }
+  // المبيعات حسب طرق الدفع (كاش / كارت / تحويل)
+  const paymentStats = [...sales, ...orders].reduce(
+    (acc, item) => {
+      const method = item.payment_method || 'cash';
+      const amount = Number(item.total ?? item.amount_paid ?? item.paid_amount ?? item.paid ?? 0);
+      if (method === 'cash') acc.cash += amount;
+      else if (method === 'card') acc.card += amount;
+      else if (method === 'transfer') acc.transfer += amount;
+      return acc;
+    },
+    { cash: 0, card: 0, transfer: 0 }
+  );
 
-    await fetchData();
-    setShowExpenseModal(false);
-    setExpenseForm({ ...expenseForm, description: '', amount: '' });
-  }
+  // حفظ مصورف جديد
+  const handleSaveExpense = async () => {
+    if (!expenseForm.amount || Number(expenseForm.amount) <= 0) {
+      alert('يرجى إدخال مبلغ صحيح للمصروف');
+      return;
+    }
 
-  async function saveCash() {
-    const { error } = await supabase.from('cash_register').insert({
-      register_date: cashForm.register_date,
-      opening_balance: parseFloat(cashForm.opening_balance) || 0,
-      cash_in: parseFloat(cashForm.cash_in) || 0,
-      cash_out: parseFloat(cashForm.cash_out) || 0,
-      closing_balance: parseFloat(cashForm.closing_balance) || 0,
-      notes: cashForm.notes || null,
-      employee_id: cashForm.employee_id || null,
-    });
-    if (error) { alert('خطأ: ' + error.message); return; }
+    try {
+      const { error } = await supabase.from('expenses').insert({
+        category: expenseForm.category,
+        amount: Number(expenseForm.amount),
+        description: expenseForm.description,
+        payment_method: expenseForm.payment_method,
+        expense_date: expenseForm.expense_date,
+      });
 
-    await fetchData();
-    setShowCashModal(false);
-    setCashForm({ ...cashForm, opening_balance: '', cash_in: '', cash_out: '', closing_balance: '', notes: '', employee_id: '' });
-  }
+      if (error) throw error;
 
-  async function deleteExpense(id: string) {
-    if (!confirm('هل أنت متأكد؟')) return;
-    await supabase.from('expenses').delete().eq('id', id);
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
-  }
+      setShowExpenseModal(false);
+      setExpenseForm({
+        category: 'مشتريات وبضاعة',
+        amount: '',
+        description: '',
+        payment_method: 'cash',
+        expense_date: new Date().toISOString().split('T')[0],
+      });
+      fetchData();
+    } catch (error: any) {
+      alert('خطأ أثناء حفظ المصروف: ' + error.message);
+    }
+  };
+
+  // تسجيل إغلاق/تسوية الصندوق
+  const handleSaveCashRegister = async () => {
+    const opening = Number(cashForm.opening_balance) || 0;
+    const closing = Number(cashForm.closing_balance) || 0;
+
+    try {
+      const { error } = await supabase.from('cash_register').insert({
+        opening_balance: opening,
+        closing_balance: closing,
+        total_in: todayTotalRevenue,
+        total_out: todayExpensesTotal,
+        notes: cashForm.notes,
+        register_date: cashForm.register_date,
+      });
+
+      if (error) throw error;
+
+      setShowCashModal(false);
+      setCashForm({
+        opening_balance: '',
+        closing_balance: '',
+        notes: '',
+        register_date: new Date().toISOString().split('T')[0],
+      });
+      fetchData();
+    } catch (error: any) {
+      alert('خطأ أثناء تسجيل الصندوق: ' + error.message);
+    }
+  };
+
+  const filteredExpenses = expenses.filter(
+    (e) =>
+      e.description?.toLowerCase().includes(expenseSearch.toLowerCase()) ||
+      e.category?.toLowerCase().includes(expenseSearch.toLowerCase())
+  );
 
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div>
-      <PageHeader title="المحاسبة والصندوق" subtitle="إدارة النقدية والمصروفات والتقارير المالية" />
+    <div className="space-y-6">
+      <PageHeader
+        title="المحاسبة والشؤون المالية"
+        subtitle="إدارة وتتبع الإيرادات، المصروفات، تسوية الصندوق، وحساب صافي الأرباح"
+        action={
+          <div className="flex gap-2">
+            <button onClick={() => setShowCashModal(true)} className="btn-secondary flex items-center gap-2">
+              <Wallet className="w-4 h-4" /> تسوية الصندوق
+            </button>
+            <button onClick={() => setShowExpenseModal(true)} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" /> إضافة مصروف
+            </button>
+          </div>
+        }
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
-        {([
-          { id: 'overview', label: 'نظرة عامة' },
-          { id: 'cash', label: 'الصندوق' },
-          { id: 'expenses', label: 'المصروفات' },
-        ] as const).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-              tab === t.id ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* التبويبات الرئيسة */}
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`pb-3 px-4 font-medium text-sm transition-colors border-b-2 ${
+            activeTab === 'overview'
+              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+          }`}
+        >
+          نظرة عامة والملخص المالي
+        </button>
+        <button
+          onClick={() => setActiveTab('expenses')}
+          className={`pb-3 px-4 font-medium text-sm transition-colors border-b-2 ${
+            activeTab === 'expenses'
+              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+          }`}
+        >
+          سجل المصروفات والنفقات
+        </button>
+        <button
+          onClick={() => setActiveTab('cash')}
+          className={`pb-3 px-4 font-medium text-sm transition-colors border-b-2 ${
+            activeTab === 'cash'
+              ? 'border-brand-600 text-brand-600 dark:text-brand-400'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400'
+          }`}
+        >
+          حركة وتقفيل الصندوق (الكاش)
+        </button>
       </div>
 
-      {/* Overview */}
-      {tab === 'overview' && (
-        <div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatCard label="مبيعات اليوم" value={formatCurrency(todaySales)} icon={<DollarSign className="w-6 h-6 text-white" />} color="accent" />
-            <StatCard label="مبيعات الشهر" value={formatCurrency(monthSales)} icon={<TrendingUp className="w-6 h-6 text-white" />} color="brand" />
-            <StatCard label="مصروفات الشهر" value={formatCurrency(monthExpenses)} icon={<TrendingDown className="w-6 h-6 text-white" />} color="error" />
-            <StatCard label="صافي الربح" value={formatCurrency(profit)} icon={<Wallet className="w-6 h-6 text-white" />} color={profit >= 0 ? 'accent' : 'error'} />
-          </div>
-
-          {/* Sales by payment method */}
-          <div className="card p-6">
-            <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">المبيعات حسب طريقة الدفع (الشهر الحالي)</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {(['cash', 'card', 'transfer', 'partial', 'installment'] as const).map((m) => {
-                const salesTotal = sales
-                  .filter((s) => s.payment_method === m && s.created_at >= monthStart)
-                  .reduce((sum, s) => sum + Number(s.total || 0), 0);
-                
-                const ordersTotal = orders
-                  .filter((o) => (o.payment_method === m || (!o.payment_method && m === 'cash')) && o.created_at >= monthStart)
-                  .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
-
-                return (
-                  <div key={m} className="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40">
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{PAYMENT_LABELS[m] || m}</p>
-                    <p className="text-lg font-bold text-slate-800 dark:text-white">{formatCurrency(salesTotal + ordersTotal)}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Cash Register */}
-      {tab === 'cash' && (
-        <div>
-          <div className="flex justify-end mb-4">
-            <button onClick={() => setShowCashModal(true)} className="btn-primary">
-              <Plus className="w-4 h-4" /> تسجيل الصندوق
-            </button>
-          </div>
-          {cashEntries.length === 0 ? (
-            <div className="card"><EmptyState message="لا توجد سجلات للصندوق" icon={<Wallet className="w-10 h-10" />} /></div>
-          ) : (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 dark:bg-slate-700/50">
-                    <tr>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">التاريخ</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">افتتاح</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">داخل</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">خارج</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">إغلاق</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">ملاحظات</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashEntries.map((c) => (
-                      <tr key={c.id} className="table-row">
-                        <td className="p-3 text-sm text-slate-700 dark:text-slate-200">{formatDate(c.register_date)}</td>
-                        <td className="p-3 text-sm text-slate-600 dark:text-slate-300">{formatCurrency(c.opening_balance)}</td>
-                        <td className="p-3 text-sm text-accent-600 dark:text-accent-400">{formatCurrency(c.cash_in)}</td>
-                        <td className="p-3 text-sm text-error-600 dark:text-error-400">{formatCurrency(c.cash_out)}</td>
-                        <td className="p-3 text-sm font-bold text-slate-700 dark:text-slate-200">{formatCurrency(c.closing_balance)}</td>
-                        <td className="p-3 text-sm text-slate-400">{c.notes || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          {/* كروت المؤشرات الأساسية */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-accent-100 dark:bg-accent-900/40 text-accent-600 dark:text-accent-400 flex items-center justify-center">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">إيرادات الشهر الحالي</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{formatCurrency(monthTotalRevenue)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">اليوم: {formatCurrency(todayTotalRevenue)}</p>
               </div>
             </div>
-          )}
+
+            <div className="card p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-error-100 dark:bg-error-900/40 text-error-600 dark:text-error-400 flex items-center justify-center">
+                <TrendingDown className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">مصروفات الشهر الحالي</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">{formatCurrency(monthExpensesTotal)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">اليوم: {formatCurrency(todayExpensesTotal)}</p>
+              </div>
+            </div>
+
+            <div className="card p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+                <DollarSign className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">صافي أرباح الشهر</p>
+                <p className={`text-xl font-bold ${monthNetProfit >= 0 ? 'text-accent-600 dark:text-accent-400' : 'text-error-600'}`}>
+                  {formatCurrency(monthNetProfit)}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">اليوم: {formatCurrency(todayNetProfit)}</p>
+              </div>
+            </div>
+
+            <div className="card p-4 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center">
+                <Wallet className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">رصيد الصندوق الحالي</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {formatCurrency(cashRegisters[0]?.closing_balance || paymentStats.cash)}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">آخر تسوية: {cashRegisters[0] ? formatDate(cashRegisters[0].register_date) : 'لا يوجد'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* تفاصيل المبيعات وطرق الدفع */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="card p-5 lg:col-span-2 space-y-4">
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">المبيعات والمقبوضات حسب طريقة الدفع</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">نقداً (كاش)</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100">{formatCurrency(paymentStats.cash)}</span>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">بطاقة إلكترونية</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100">{formatCurrency(paymentStats.card)}</span>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block mb-1">تحويل بنكي</span>
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-100">{formatCurrency(paymentStats.transfer)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-5 space-y-4">
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">ملخص عمليات الشهر</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-500">إجمالي مبيعات المعرض:</span>
+                  <span className="font-semibold">{formatCurrency(monthSalesTotal)}</span>
+                </div>
+                <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-500">دفوعات ومقدمات الطلبيات:</span>
+                  <span className="font-semibold text-accent-600">{formatCurrency(monthOrdersPaid)}</span>
+                </div>
+                <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-500">إجمالي النفقات:</span>
+                  <span className="font-semibold text-error-600">{formatCurrency(monthExpensesTotal)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Expenses */}
-      {tab === 'expenses' && (
-        <div>
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <div className="relative flex-1">
+      {activeTab === 'expenses' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <div className="relative">
               <Search className="w-5 h-5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث في المصروفات..." className="input pr-10" />
+              <input
+                type="text"
+                value={expenseSearch}
+                onChange={(e) => setExpenseSearch(e.target.value)}
+                placeholder="ابحث في سجل المصروفات..."
+                className="input pr-10"
+              />
             </div>
-            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className="input sm:w-48">
-              <option value="all">كل الفئات</option>
-              {EXPENSE_CATS.map((c) => (
-                <option key={c} value={c}>{EXPENSE_LABELS[c]}</option>
-              ))}
-            </select>
-            <button onClick={() => setShowExpenseModal(true)} className="btn-primary">
-              <Plus className="w-4 h-4" /> مصروف جديد
-            </button>
           </div>
 
           {filteredExpenses.length === 0 ? (
-            <div className="card"><EmptyState message="لا توجد مصروفات" icon={<TrendingDown className="w-10 h-10" />} /></div>
+            <div className="card">
+              <EmptyState message="لا توجد مصروفات مسجلة" icon={<TrendingDown className="w-10 h-10" />} />
+            </div>
           ) : (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 dark:bg-slate-700/50">
-                    <tr>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">التاريخ</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">الفئة</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">الوصف</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">المبلغ</th>
-                      <th className="text-right p-3 text-sm font-medium text-slate-500 dark:text-slate-400">الدفع</th>
-                      <th className="text-center p-3 text-sm font-medium text-slate-500 dark:text-slate-400">حذف</th>
+            <div className="card overflow-x-auto">
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">التصنيف</th>
+                    <th className="p-3">الوصف / التفاصيل</th>
+                    <th className="p-3">طريقة الدفع</th>
+                    <th className="p-3 text-left">المبلغ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {filteredExpenses.map((expense) => (
+                    <tr key={expense.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 text-slate-500 whitespace-nowrap">{formatDate(expense.expense_date)}</td>
+                      <td className="p-3 font-semibold">{expense.category}</td>
+                      <td className="p-3 text-slate-600 dark:text-slate-300">{expense.description || '—'}</td>
+                      <td className="p-3">
+                        <Badge text={PAYMENT_LABELS[expense.payment_method] || expense.payment_method} color="slate" />
+                      </td>
+                      <td className="p-3 text-left font-bold text-error-600 dark:text-error-400">
+                        {formatCurrency(expense.amount)}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExpenses.map((e) => (
-                      <tr key={e.id} className="table-row">
-                        <td className="p-3 text-sm text-slate-700 dark:text-slate-200">{formatDate(e.expense_date)}</td>
-                        <td className="p-3"><Badge text={EXPENSE_LABELS[e.category]} color="warning" /></td>
-                        <td className="p-3 text-sm text-slate-500 dark:text-slate-400">{e.description || '—'}</td>
-                        <td className="p-3 text-sm font-bold text-error-600 dark:text-error-400">{formatCurrency(e.amount)}</td>
-                        <td className="p-3 text-sm text-slate-500 dark:text-slate-400">{PAYMENT_LABELS[e.payment_method] || e.payment_method}</td>
-                        <td className="p-3 text-center">
-                          <button onClick={() => deleteExpense(e.id)} className="w-8 h-8 rounded-lg hover:bg-error-50 dark:hover:bg-error-900/30 text-error-500 flex items-center justify-center mx-auto">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
       )}
 
-      {/* Expense modal */}
-      <Modal open={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="تسجيل مصروف" size="md">
+      {activeTab === 'cash' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">التاريخ</label>
-              <input type="date" value={expenseForm.expense_date} onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })} className="input" />
+          {cashRegisters.length === 0 ? (
+            <div className="card">
+              <EmptyState message="لا توجد سجلات لتسوية الصندوق" icon={<Wallet className="w-10 h-10" />} />
             </div>
-            <div>
-              <label className="label">الفئة</label>
-              <select value={expenseForm.category} onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value as ExpenseCategory })} className="input">
-                {EXPENSE_CATS.map((c) => (
-                  <option key={c} value={c}>{EXPENSE_LABELS[c]}</option>
-                ))}
-              </select>
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-right text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                    <th className="p-3">التاريخ</th>
+                    <th className="p-3">الرصيد الافتتاحي</th>
+                    <th className="p-3">إجمالي المقبوضات</th>
+                    <th className="p-3">إجمالي المصروفات</th>
+                    <th className="p-3">الرصيد الختامي</th>
+                    <th className="p-3">ملاحظات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {cashRegisters.map((reg) => (
+                    <tr key={reg.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 text-slate-500 whitespace-nowrap">{formatDate(reg.register_date)}</td>
+                      <td className="p-3 font-medium">{formatCurrency(reg.opening_balance)}</td>
+                      <td className="p-3 font-semibold text-accent-600">+{formatCurrency(reg.total_in)}</td>
+                      <td className="p-3 font-semibold text-error-600">-{formatCurrency(reg.total_out)}</td>
+                      <td className="p-3 font-bold text-brand-600 dark:text-brand-400">{formatCurrency(reg.closing_balance)}</td>
+                      <td className="p-3 text-slate-400">{reg.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
+        </div>
+      )}
+
+      {/* مودال إضافة مصروف */}
+      <Modal open={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="إضافة مصروف جديد">
+        <div className="space-y-4">
           <div>
-            <label className="label">الوصف</label>
-            <input type="text" value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} className="input" placeholder="وصف المصروف" />
+            <label className="label">تصنيف المصروف</label>
+            <select
+              value={expenseForm.category}
+              onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+              className="input"
+            >
+              <option>مشتريات وبضاعة</option>
+              <option>إيجار ومرافق</option>
+              <option>رواتب وإكراميات</option>
+              <option>صيانة وأدوات</option>
+              <option>تسويق وإعلانات</option>
+              <option>نثريات ومصروفات أخرى</option>
+            </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">المبلغ (₪)</label>
-              <input type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })} className="input text-left" placeholder="0" />
+              <label className="label">المبلغ *</label>
+              <input
+                type="number"
+                value={expenseForm.amount}
+                onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                placeholder="0.00"
+                className="input"
+              />
             </div>
             <div>
               <label className="label">طريقة الدفع</label>
-              <select value={expenseForm.payment_method} onChange={(e) => setExpenseForm({ ...expenseForm, payment_method: e.target.value as 'cash' | 'card' | 'transfer' })} className="input">
-                <option value="cash">نقدي</option>
+              <select
+                value={expenseForm.payment_method}
+                onChange={(e) => setExpenseForm({ ...expenseForm, payment_method: e.target.value })}
+                className="input"
+              >
+                <option value="cash">نقدي (كاش)</option>
                 <option value="card">بطاقة</option>
-                <option value="transfer">تحويل</option>
+                <option value="transfer">تحويل بنكي</option>
               </select>
             </div>
           </div>
-          <button onClick={saveExpense} className="btn-primary w-full">
-            <Plus className="w-4 h-4" /> حفظ المصروف
+
+          <div>
+            <label className="label">التاريخ</label>
+            <input
+              type="date"
+              value={expenseForm.expense_date}
+              onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
+              className="input"
+            />
+          </div>
+
+          <div>
+            <label className="label">تفاصيل المصروف</label>
+            <textarea
+              value={expenseForm.description}
+              onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+              placeholder="اكتب بيان المصروف..."
+              className="input min-h-[70px]"
+            />
+          </div>
+
+          <button onClick={handleSaveExpense} className="btn-primary w-full py-2.5">
+            حفظ المصروف
           </button>
         </div>
       </Modal>
 
-      {/* Cash register modal */}
-      <Modal open={showCashModal} onClose={() => setShowCashModal(false)} title="تسجيل الصندوق اليومي" size="md">
+      {/* مودال تسوية الصندوق */}
+      <Modal open={showCashModal} onClose={() => setShowCashModal(false)} title="تسوية وإغلاق الصندوق">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">التاريخ</label>
-              <input type="date" value={cashForm.register_date} onChange={(e) => setCashForm({ ...cashForm, register_date: e.target.value })} className="input" />
+          <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs space-y-1">
+            <div className="flex justify-between">
+              <span>مقبوضات اليوم الإجمالية:</span>
+              <span className="font-bold text-accent-600">{formatCurrency(todayTotalRevenue)}</span>
             </div>
-            <div>
-              <label className="label">الموظف</label>
-              <select value={cashForm.employee_id} onChange={(e) => setCashForm({ ...cashForm, employee_id: e.target.value })} className="input">
-                <option value="">—</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
+            <div className="flex justify-between">
+              <span>مصروفات اليوم الإجمالية:</span>
+              <span className="font-bold text-error-600">{formatCurrency(todayExpensesTotal)}</span>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="label">رصيد الافتتاح</label>
-              <input type="number" value={cashForm.opening_balance} onChange={(e) => setCashForm({ ...cashForm, opening_balance: e.target.value })} className="input text-left" placeholder="0" />
+              <label className="label">الرصيد الافتتاحي</label>
+              <input
+                type="number"
+                value={cashForm.opening_balance}
+                onChange={(e) => setCashForm({ ...cashForm, opening_balance: e.target.value })}
+                placeholder="0.00"
+                className="input"
+              />
             </div>
             <div>
-              <label className="label">نقد داخل</label>
-              <input type="number" value={cashForm.cash_in} onChange={(e) => setCashForm({ ...cashForm, cash_in: e.target.value })} className="input text-left" placeholder="0" />
+              <label className="label">الرصيد الختامي (الفعلي بالدرج)</label>
+              <input
+                type="number"
+                value={cashForm.closing_balance}
+                onChange={(e) => setCashForm({ ...cashForm, closing_balance: e.target.value })}
+                placeholder="0.00"
+                className="input"
+              />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">نقد خارج</label>
-              <input type="number" value={cashForm.cash_out} onChange={(e) => setCashForm({ ...cashForm, cash_out: e.target.value })} className="input text-left" placeholder="0" />
-            </div>
-            <div>
-              <label className="label">رصيد الإغلاق</label>
-              <input type="number" value={cashForm.closing_balance} onChange={(e) => setCashForm({ ...cashForm, closing_balance: e.target.value })} className="input text-left" placeholder="0" />
-            </div>
-          </div>
+
           <div>
-            <label className="label">ملاحظات</label>
-            <textarea value={cashForm.notes} onChange={(e) => setCashForm({ ...cashForm, notes: e.target.value })} className="input min-h-[60px]" placeholder="ملاحظات..." />
+            <label className="label">تاريخ التسوية</label>
+            <input
+              type="date"
+              value={cashForm.register_date}
+              onChange={(e) => setCashForm({ ...cashForm, register_date: e.target.value })}
+              className="input"
+            />
           </div>
-          <button onClick={saveCash} className="btn-primary w-full">
-            <Calendar className="w-4 h-4" /> حفظ السجل
+
+          <div>
+            <label className="label">ملاحظات والتسوية</label>
+            <textarea
+              value={cashForm.notes}
+              onChange={(e) => setCashForm({ ...cashForm, notes: e.target.value })}
+              placeholder="أي فروقات أو ملاحظات حول الصندوق..."
+              className="input min-h-[60px]"
+            />
+          </div>
+
+          <button onClick={handleSaveCashRegister} className="btn-primary w-full py-2.5">
+            حفظ تسوية الصندوق
           </button>
         </div>
       </Modal>
