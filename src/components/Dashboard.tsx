@@ -31,11 +31,10 @@ interface OrderRecord {
   customers?: { name: string } | null;
 }
 
-interface TransactionRecord {
+interface ExpenseRecord {
   id: string;
   amount: number;
-  type: 'income' | 'expense';
-  created_at: string;
+  expense_date: string;
 }
 
 export default function Dashboard() {
@@ -65,19 +64,35 @@ export default function Dashboard() {
     return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
   };
 
-  // مقارنة التواريخ حسب المنطقة الزمنية المحلية
-  const isSameDay = (d1: Date, d2: Date) => {
+  // دوال تحقق التواريخ بنفس آلية صفحة المحاسبة بالضبط
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const currentDay = now.getDate();
+
+  const isThisMonth = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+  };
+
+  const isToday = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
     return (
-      d1.getFullYear() === d2.getFullYear() &&
-      d1.getMonth() === d2.getMonth() &&
-      d1.getDate() === d2.getDate()
+      d.getFullYear() === currentYear &&
+      d.getMonth() === currentMonth &&
+      d.getDate() === currentDay
     );
   };
 
-  const isSameMonth = (d1: Date, d2: Date) => {
+  const isSameDay = (dateStr: string, targetDate: Date) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
     return (
-      d1.getFullYear() === d2.getFullYear() &&
-      d1.getMonth() === d2.getMonth()
+      d.getFullYear() === targetDate.getFullYear() &&
+      d.getMonth() === targetDate.getMonth() &&
+      d.getDate() === targetDate.getDate()
     );
   };
 
@@ -85,13 +100,11 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        const now = new Date();
-
-        // جلب البيانات من كافة أقسام النظام (المحاسبة، المبيعات، الطلبيات، المخزون، الفحوصات، العملاء)
+        // جلب البيانات الموحدة من جميع الجداول المطلوبة
         const [
           salesRes,
           ordersRes,
-          transactionsRes,
+          expensesRes,
           inventoryRes,
           examsRes,
           customersRes,
@@ -101,7 +114,7 @@ export default function Dashboard() {
           supabase
             .from('orders')
             .select('id, status, total_amount, total, amount_paid, paid_amount, paid, created_at, customers(name)'),
-          supabase.from('transactions').select('id, amount, type, created_at'),
+          supabase.from('expenses').select('id, amount, expense_date'),
           supabase.from('inventory').select('id, name, quantity, reorder_level'),
           supabase.from('examinations').select('id, exam_date, created_at'),
           supabase.from('customers').select('id', { count: 'exact', head: true }),
@@ -114,51 +127,43 @@ export default function Dashboard() {
 
         const sales: SaleRecord[] = salesRes.data || [];
         const orders: OrderRecord[] = ordersRes.data || [];
-        const transactions: TransactionRecord[] = transactionsRes.data || [];
+        const expenses: ExpenseRecord[] = expensesRes.data || [];
 
-        // 1. حساب الإيرادات من المبيعات المباشرة
+        // 1. حساب مبيعات المعرض المباشرة
         const monthSalesTotal = sales
-          .filter((s) => s.created_at && isSameMonth(new Date(s.created_at), now))
+          .filter((s) => isThisMonth(s.created_at))
           .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
         const todaySalesTotal = sales
-          .filter((s) => s.created_at && isSameDay(new Date(s.created_at), now))
+          .filter((s) => isToday(s.created_at))
           .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
         // 2. حساب مقبوضات الطلبيات
         const monthOrdersPaid = orders
-          .filter((o) => o.created_at && isSameMonth(new Date(o.created_at), now))
+          .filter((o) => isThisMonth(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
         const todayOrdersPaid = orders
-          .filter((o) => o.created_at && isSameDay(new Date(o.created_at), now))
+          .filter((o) => isToday(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // 3. ربط معاملات قسم المحاسبة (سندات القبر والصرف العامة)
-        const todayIncomeTx = transactions
-          .filter((t) => t.type === 'income' && t.created_at && isSameDay(new Date(t.created_at), now))
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        // إجمالي الإيرادات المباشرة والمقبوضات (مطابق لصفحة المحاسبة)
+        const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
+        const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
 
-        const monthIncomeTx = transactions
-          .filter((t) => t.type === 'income' && t.created_at && isSameMonth(new Date(t.created_at), now))
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        // 3. حساب المصروفات من جدول expenses
+        const monthExpensesTotal = expenses
+          .filter((e) => isThisMonth(e.expense_date))
+          .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-        const todayExpenseTx = transactions
-          .filter((t) => t.type === 'expense' && t.created_at && isSameDay(new Date(t.created_at), now))
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        const todayExpensesTotal = expenses
+          .filter((e) => isToday(e.expense_date))
+          .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-        const monthExpenseTx = transactions
-          .filter((t) => t.type === 'expense' && t.created_at && isSameMonth(new Date(t.created_at), now))
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-
-        // الإيرادات الإجمالية للمحل (مبيعات + دفوعات طلبيات + المقبوضات الأخرى)
-        const todayTotalRevenue = todaySalesTotal + todayOrdersPaid + todayIncomeTx;
-        const monthTotalRevenue = monthSalesTotal + monthOrdersPaid + monthIncomeTx;
-
-        // 4. الفحوصات والطلبيات والمخزون
+        // 4. الفحوصات والمخزون والطلبيات النشطة
         const todayExamsCount = (examsRes.data || []).filter((e) => {
           const date = e.exam_date || e.created_at;
-          return date && isSameDay(new Date(date), now);
+          return isToday(date);
         }).length;
 
         const activeOrders = orders.filter((o) => ['pending', 'in_lab', 'ready'].includes(o.status));
@@ -169,40 +174,36 @@ export default function Dashboard() {
         setStats({
           todaySales: todayTotalRevenue,
           monthSales: monthTotalRevenue,
-          todayExpenses: todayExpenseTx,
-          monthExpenses: monthExpenseTx,
+          todayExpenses: todayExpensesTotal,
+          monthExpenses: monthExpensesTotal,
           activeOrders: activeOrders.length,
           lowStock: lowStock.length,
           todayExams: todayExamsCount,
           totalCustomers: customersRes.count || 0,
         });
 
-        // 5. رسم بياني لإيرادات أخر 7 أيام
+        // 5. رسم بياني لإيرادات آخر 7 أيام (المبيعات + مقبوضات الطلبيات)
         const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
           const targetDate = new Date();
           targetDate.setDate(now.getDate() - i);
 
           const daySales = sales
-            .filter((s) => s.created_at && isSameDay(new Date(s.created_at), targetDate))
+            .filter((s) => isSameDay(s.created_at, targetDate))
             .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
           const dayOrders = orders
-            .filter((o) => o.created_at && isSameDay(new Date(o.created_at), targetDate))
+            .filter((o) => isSameDay(o.created_at, targetDate))
             .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
-
-          const dayIncome = transactions
-            .filter((t) => t.type === 'income' && t.created_at && isSameDay(new Date(t.created_at), targetDate))
-            .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
           daysData.push({
             day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
-            amount: daySales + dayOrders + dayIncome,
+            amount: daySales + dayOrders,
           });
         }
         setRevenueData(daysData);
 
-        // 6. قوائم المنتجات والطلبيات والمخزون
+        // 6. قوائم الأكثر مبيعاً وتنبيهات المخزون والطلبيات
         setTopItems((itemsRes.data || []).map((i) => ({ name: i.item_name, qty: Number(i.quantity) || 0 })));
         setLowStockItems(lowStock.slice(0, 5));
 
