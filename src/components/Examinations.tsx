@@ -369,11 +369,19 @@ export default function Examinations() {
             {/* تقرير الفحص بتصميم طولي يماثل الفحوصات المخبرية */}
             <div id="print-prescription" className="p-8 bg-white text-slate-900 border border-slate-300 rounded-lg max-w-2xl mx-auto font-sans dir-rtl">
               
-              {/* ترويسة التقرير / Header */}
+              {/* ترويسة التقرير مع الشعار / Header */}
               <div className="flex justify-between items-center pb-6 mb-6 border-b-2 border-slate-900">
-                <div className="text-right">
-                  <h1 className="font-bold text-2xl text-slate-900 tracking-wide">المركز الإيطالي للبصريات</h1>
-                  <p className="text-xs text-slate-600 mt-1 uppercase font-semibold">Italian Optical Center - Vision Care</p>
+                <div className="flex items-center gap-4 text-right">
+                  <img 
+                    src="/logo.png" 
+                    alt="لوجو المركز الإيطالي للبصريات" 
+                    className="w-16 h-16 object-contain"
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                  />
+                  <div>
+                    <h1 className="font-bold text-2xl text-slate-900 tracking-wide">المركز الإيطالي للبصريات</h1>
+                    <p className="text-xs text-slate-600 mt-1 uppercase font-semibold">Italian Optical Center - Vision Care</p>
+                  </div>
                 </div>
                 <div className="text-left">
                   <div className="px-3 py-1 bg-slate-100 text-slate-800 font-bold text-xs uppercase border border-slate-300 rounded">
