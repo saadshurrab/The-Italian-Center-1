@@ -25,9 +25,8 @@ interface OrderRecord {
   amount_paid?: number;
   paid_amount?: number;
   paid?: number;
-  customer_id?: string;
-  customers?: { name: string };
   created_at: string;
+  customers?: { name: string } | null;
 }
 
 export default function Dashboard() {
@@ -49,29 +48,24 @@ export default function Dashboard() {
     { id: string; status: string; total_amount: number; customer_name: string }[]
   >([]);
 
-  // دوال مساعدة مطابقة تماماً لشاشة المحاسبة (Accounting.tsx)
+  // استخراج المبلغ المدفوع بدقة من الطلبية
   const getOrderPaidAmount = (o: OrderRecord) => {
     return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
   };
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth();
-  const currentDay = now.getDate();
-
-  const isThisMonth = (dateStr?: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+  // دالة مقارنة التواريخ حسب المنطقة الزمنية المحلية للمستخدم (تمنع مشاكل UTC)
+  const isSameDay = (d1: Date, d2: Date) => {
+    return (
+      d1.getFullYear() === d2.getFullYear() &&
+      d1.getMonth() === d2.getMonth() &&
+      d1.getDate() === d2.getDate()
+    );
   };
 
-  const isToday = (dateStr?: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
+  const isSameMonth = (d1: Date, d2: Date) => {
     return (
-      d.getFullYear() === currentYear &&
-      d.getMonth() === currentMonth &&
-      d.getDate() === currentDay
+      d1.getFullYear() === d2.getFullYear() &&
+      d1.getMonth() === d2.getMonth()
     );
   };
 
@@ -79,9 +73,9 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        const todayStartStr = new Date(currentYear, currentMonth, currentDay).toISOString().slice(0, 10);
+        const now = new Date();
 
-        // جلب البيانات من الجداول
+        // جلب البيانات الأساسية من Supabase
         const [
           salesRes,
           ordersRes,
@@ -93,7 +87,7 @@ export default function Dashboard() {
           supabase.from('sales').select('id, total, created_at'),
           supabase.from('orders').select('id, status, total_amount, total, amount_paid, paid_amount, paid, created_at, customers(name)'),
           supabase.from('inventory').select('id, name, quantity, reorder_level'),
-          supabase.from('examinations').select('id, exam_date').gte('exam_date', todayStartStr),
+          supabase.from('examinations').select('id, exam_date, created_at'),
           supabase.from('customers').select('id', { count: 'exact', head: true }),
           supabase.from('sale_items').select('item_name, quantity').order('quantity', { ascending: false }).limit(5)
         ]);
@@ -103,80 +97,79 @@ export default function Dashboard() {
 
         // 1. حساب مبيعات المعرض المباشرة
         const monthSalesTotal = sales
-          .filter((s) => isThisMonth(s.created_at))
+          .filter((s) => s.created_at && isSameMonth(new Date(s.created_at), now))
           .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
         const todaySalesTotal = sales
-          .filter((s) => isToday(s.created_at))
+          .filter((s) => s.created_at && isSameDay(new Date(s.created_at), now))
           .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-        // 2. حساب المقبوضات الفعلية والمدفوعات المقدمة للطلبيات
+        // 2. حساب مقبوضات الطلبيات (المقدمات / الدفعات)
         const monthOrdersPaid = orders
-          .filter((o) => isThisMonth(o.created_at))
+          .filter((o) => o.created_at && isSameMonth(new Date(o.created_at), now))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
         const todayOrdersPaid = orders
-          .filter((o) => isToday(o.created_at))
+          .filter((o) => o.created_at && isSameDay(new Date(o.created_at), now))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // 3. المجموع الإجمالي الفعلي المقبوض (مطابق للمحاسبة تماماً)
+        // 3. الإجمالي المالي الموحد مع شاشة المحاسبة
         const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
         const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
-        // الطلبات النشطة وتنبيهات المخزون
+        // حساب الفحوصات والطلبيات النشطة والمخزون
+        const todayExamsCount = (examsRes.data || []).filter((e) => {
+          const date = e.exam_date || e.created_at;
+          return date && isSameDay(new Date(date), now);
+        }).length;
+
         const activeOrders = orders.filter((o) => ['pending', 'in_lab', 'ready'].includes(o.status));
-        const lowStock = (inventoryRes.data || []).filter((i) => i.quantity <= i.reorder_level);
+        const lowStock = (inventoryRes.data || []).filter((i) => Number(i.quantity) <= Number(i.reorder_level));
 
         setStats({
           todaySales: todayTotalRevenue,
           monthSales: monthTotalRevenue,
           activeOrders: activeOrders.length,
           lowStock: lowStock.length,
-          todayExams: (examsRes.data || []).length,
+          todayExams: todayExamsCount,
           totalCustomers: customersRes.count || 0,
         });
 
-        // 4. حساب إيرادات آخر 7 أيام (شاملة المقبوضات والطلبات)
+        // 4. رسم بياني لإيرادات آخر 7 أيام
         const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
-          const d = new Date(now);
-          d.setDate(d.getDate() - i);
-          
+          const targetDate = new Date();
+          targetDate.setDate(now.getDate() - i);
+
           const daySales = sales
-            .filter((s) => {
-              const sd = new Date(s.created_at);
-              return sd.getFullYear() === d.getFullYear() && sd.getMonth() === d.getMonth() && sd.getDate() === d.getDate();
-            })
+            .filter((s) => s.created_at && isSameDay(new Date(s.created_at), targetDate))
             .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
           const dayOrders = orders
-            .filter((o) => {
-              const od = new Date(o.created_at);
-              return od.getFullYear() === d.getFullYear() && od.getMonth() === d.getMonth() && od.getDate() === d.getDate();
-            })
+            .filter((o) => o.created_at && isSameDay(new Date(o.created_at), targetDate))
             .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
           daysData.push({
-            day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(d),
+            day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
             amount: daySales + dayOrders,
           });
         }
         setRevenueData(daysData);
 
-        // الأكثر مبيعاً والمخزون والطلبات النشطة
-        setTopItems((itemsRes.data || []).map((i) => ({ name: i.item_name, qty: i.quantity })));
+        // تحديث باقي القوائم
+        setTopItems((itemsRes.data || []).map((i) => ({ name: i.item_name, qty: Number(i.quantity) || 0 })));
         setLowStockItems(lowStock.slice(0, 5));
 
         const activeList = activeOrders.slice(0, 5).map((o) => ({
           id: o.id,
           status: o.status,
           total_amount: Number(o.total_amount ?? o.total ?? 0),
-          customer_name: o.customers?.name || '—',
+          customer_name: (Array.isArray(o.customers) ? o.customers[0]?.name : o.customers?.name) || 'عميل نقدي',
         }));
         setActiveOrdersList(activeList);
 
       } catch (error) {
-        console.error('خطأ في تحميل بيانات Dashboard:', error);
+        console.error('خطأ في جلب بيانات لوحة التحكم:', error);
       } finally {
         setLoading(false);
       }
@@ -205,7 +198,7 @@ export default function Dashboard() {
         {/* Revenue chart */}
         <div className="card p-6">
           <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">
-            إيرادات آخر 7 أيام (شاملة المبيعات والمدفوعات)
+            إيرادات آخر 7 أيام (مبيعات + مدفوعات طلبيات)
           </h3>
           <div className="flex items-end justify-between gap-2 h-48">
             {revenueData.map((d, i) => (
