@@ -57,7 +57,7 @@ const emptyForm = {
   customer_id: '',
   examination_id: '',
   lens_details: {
-    lens_type: 'مسافات', // مسافات، قراءة، متعدد البؤر (Progressive)، إلخ.
+    lens_type: 'مسافات',
     lens_material: 'بلاستيك مقاوم للخدش',
     coating: 'HMC / ضد الانعكاس',
     right_eye_notes: '',
@@ -148,7 +148,6 @@ export default function Orders() {
   async function openEdit(order: Order) {
     setEditingOrder(order);
 
-    // جلب عناصر الطلب للتعديل
     const { data: items } = await supabase.from('order_items').select('*').eq('order_id', order.id);
 
     setForm({
@@ -168,7 +167,6 @@ export default function Orders() {
     setShowModal(true);
   }
 
-  // إضافة صنف من المخزون تلقائياً عند اختياره
   function handleSelectInventoryItem(inventoryId: string) {
     const item = inventory.find((i) => i.id === inventoryId);
     if (!item) return;
@@ -203,16 +201,14 @@ export default function Orders() {
 
     const total = form.items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.quantity) || 1), 0);
     const paid = Number(form.amount_paid) || 0;
-    const balance = Math.max(0, total - paid);
 
-    // تجهيز كائن البيانات المرسلة مع مراعاة القيود وإزالة العمود غير الموجود لمنع خطأ 400
+    // تم استبعاد balance و lens_details لمنع أخطاء قاعدة البيانات
     const orderPayload: Record<string, any> = {
       customer_id: form.customer_id,
       examination_id: form.examination_id && form.examination_id.trim() !== '' ? form.examination_id : null,
       status: editingOrder?.status || 'pending',
       total_amount: total,
       amount_paid: paid,
-      balance: balance,
       notes: form.notes ? form.notes : null,
     };
 
@@ -355,6 +351,7 @@ export default function Orders() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {filtered.map((order) => {
               const Icon = STATUS_ICONS[order.status];
+              const calculatedBalance = Math.max(0, order.total_amount - order.amount_paid);
               return (
                 <div key={order.id} className="card card-hover p-4 border-l-4 border-l-brand-500">
                   <div className="flex items-start justify-between mb-3">
@@ -392,10 +389,10 @@ export default function Orders() {
                       المتبقي:{' '}
                       <span
                         className={`font-bold ${
-                          order.balance > 0 ? 'text-error-600 dark:text-error-400' : 'text-slate-600 dark:text-slate-300'
+                          calculatedBalance > 0 ? 'text-error-600 dark:text-error-400' : 'text-slate-600 dark:text-slate-300'
                         }`}
                       >
-                        {formatCurrency(order.balance)}
+                        {formatCurrency(calculatedBalance)}
                       </span>
                     </span>
                   </div>
@@ -525,7 +522,6 @@ export default function Orders() {
           <div>
             <label className="label">عناصر الطلبية (الإطار والعدسات والإكسسوارات)</label>
             <div className="card p-3 bg-slate-50 dark:bg-slate-800/30 space-y-3">
-              {/* Select from Inventory optionally */}
               {inventory.length > 0 && (
                 <div className="mb-2">
                   <select
@@ -648,14 +644,12 @@ export default function Orders() {
               </button>
             </div>
 
-            {/* Printable Receipt Container */}
             <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
               <div className="text-center border-b pb-3 mb-4">
                 <h2 className="text-xl font-bold">مركز البصريات والعيادة الطبية</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">إيصال طلب وتصنيع نظارة</p>
               </div>
 
-              {/* Order & Customer Metadata */}
               <div className="grid grid-cols-2 gap-2 text-xs mb-4 bg-slate-50 dark:bg-slate-700/50 p-3 rounded">
                 <div>
                   <span className="text-slate-500">اسم العميل:</span> <strong>{viewOrder.customers?.name || '—'}</strong>
@@ -674,7 +668,6 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* Attached Prescription details if found */}
               {viewOrder.examination && (
                 <div className="mb-4 border border-brand-200 dark:border-brand-900/50 p-2.5 rounded bg-brand-50/30 dark:bg-brand-950/20 text-xs">
                   <div className="font-semibold text-brand-700 dark:text-brand-300 mb-1 flex items-center gap-1">
@@ -687,15 +680,6 @@ export default function Orders() {
                 </div>
               )}
 
-              {/* Technical Lens Details */}
-              {(viewOrder as any).lens_details && (
-                <div className="mb-4 text-xs bg-slate-50 dark:bg-slate-700/30 p-2.5 rounded">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">تفاصيل العدسات: </span>
-                  <span>{(viewOrder as any).lens_details.lens_type}</span> | <span>{(viewOrder as any).lens_details.lens_material}</span> | <span>{(viewOrder as any).lens_details.coating}</span>
-                </div>
-              )}
-
-              {/* Order Items Table */}
               {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
                 <table className="w-full text-right text-xs mb-4 border-collapse">
                   <thead>
@@ -721,7 +705,6 @@ export default function Orders() {
                 <p className="text-xs text-slate-400 text-center py-3">لا توجد عناصر مسجلة في هذا الطلب</p>
               )}
 
-              {/* Financial Summary */}
               <div className="border-t pt-3 text-xs space-y-1">
                 <div className="flex justify-between font-bold text-sm">
                   <span>المجموع الكلي:</span>
@@ -733,8 +716,8 @@ export default function Orders() {
                 </div>
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
                   <span>المتبقي عند الاستلام:</span>
-                  <span className={viewOrder.balance > 0 ? 'text-red-500 font-bold' : 'font-semibold'}>
-                    {formatCurrency(viewOrder.balance)}
+                  <span className={(viewOrder.total_amount - viewOrder.amount_paid) > 0 ? 'text-red-500 font-bold' : 'font-semibold'}>
+                    {formatCurrency(Math.max(0, viewOrder.total_amount - viewOrder.amount_paid))}
                   </span>
                 </div>
               </div>
