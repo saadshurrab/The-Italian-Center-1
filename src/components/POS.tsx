@@ -123,11 +123,12 @@ export default function POS() {
   const discountNum = parseFloat(discount) || 0;
   const total = Math.max(0, subtotal - discountNum);
 
-  // إذا أدخل المستخدم مبلغاً نأخذه، وإلا نعتبر أنه دفع المبلغ كاملاً تلقائياً
-  const actualPaid = paymentMethod === 'cash'
+  // احتساب المبلغ المدفوع والباقي/المتبقي بشكل دقيق
+  const actualPaid = paymentMethod === 'cash' || paymentMethod === 'partial'
     ? (amountPaid !== '' ? parseFloat(amountPaid) || 0 : total)
     : total;
-  const change = paymentMethod === 'cash' ? Math.max(0, actualPaid - total) : 0;
+    
+  const remainingOrChange = actualPaid - total;
 
   async function handleCheckout() {
     if (cart.length === 0) return;
@@ -145,14 +146,14 @@ export default function POS() {
           total,
           payment_method: paymentMethod,
           amount_paid: actualPaid,
-          change_due: change,
+          change_due: remainingOrChange > 0 ? remainingOrChange : 0,
         })
         .select()
         .single();
 
       if (saleErr) throw saleErr;
 
-      // 2. تجهيز عناصر السلة للإدراج (بدون line_total لأنه عمود يُحسب تلقائياً)
+      // 2. تجهيز عناصر السلة للإدراج
       const saleItems = cart.map((c) => {
         const itemData: any = {
           sale_id: sale.id,
@@ -189,7 +190,7 @@ export default function POS() {
         }
       }
 
-      // 5. إعداد الإيصال وتفريغ السلة
+      // 5. إعداد الإيصال الشامل وتفريغ السلة
       const customer = customers.find((c) => c.id === selectedCustomer);
 
       setReceiptData({
@@ -200,8 +201,9 @@ export default function POS() {
         total,
         paymentMethod,
         amountPaid: actualPaid,
-        change,
-        customer: customer?.name || 'عميل نقدي',
+        remainingOrChange,
+        customerName: customer?.name || 'عميل نقدي',
+        customerPhone: customer?.phone || 'غير مسجل',
         date: new Date().toISOString(),
       });
       setShowReceipt(true);
@@ -252,7 +254,7 @@ export default function POS() {
 
   return (
     <div>
-      {/* CSS الخاص بالطباعة بجعل الفاتورة ناصعة وممتدة بكامل عرض الصفحة */}
+      {/* CSS الخاص بطباعة الإيصال كصفحة كاملة رسمية */}
       <style>{`
         @media print {
           body * {
@@ -267,10 +269,10 @@ export default function POS() {
             top: 0 !important;
             width: 100% !important;
             margin: 0 !important;
-            padding: 20px !important;
+            padding: 25px !important;
             background: #fff !important;
             color: #000 !important;
-            font-family: sans-serif !important;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
             box-shadow: none !important;
           }
           .no-print {
@@ -437,9 +439,9 @@ export default function POS() {
               </div>
             </div>
 
-            {paymentMethod === 'cash' && (
+            {(paymentMethod === 'cash' || paymentMethod === 'partial') && (
               <div>
-                <label className="label">المبلغ المدفوع (اتركه فارغاً إن تم دفع الإجمالي)</label>
+                <label className="label">المبلغ المدفوع (اتركه فارغاً إن دفع الكلي)</label>
                 <input
                   type="number"
                   value={amountPaid}
@@ -449,7 +451,12 @@ export default function POS() {
                 />
                 {actualPaid > total && (
                   <p className="text-sm text-accent-600 dark:text-accent-400 mt-1">
-                    الباقي: {formatCurrency(change)}
+                    الباقي للعميل: {formatCurrency(actualPaid - total)}
+                  </p>
+                )}
+                {actualPaid < total && (
+                  <p className="text-sm text-red-500 mt-1">
+                    المتبقي كدين: {formatCurrency(total - actualPaid)}
                   </p>
                 )}
               </div>
@@ -475,7 +482,7 @@ export default function POS() {
           </div>
           <div>
             <label className="label">رقم الهاتف</label>
-            <input type="text" value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} className="input" placeholder="07XX XXX XXXX" />
+            <input type="text" value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} className="input" placeholder="059XXXXXXXX" />
           </div>
           <button onClick={addQuickCustomer} className="btn-primary w-full">
             <CheckCircle className="w-4 h-4" /> حفظ
@@ -483,79 +490,117 @@ export default function POS() {
         </div>
       </Modal>
 
-      {/* Receipt Modal & Printable Template */}
-      <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع" size="md">
+      {/* Receipt Modal & Official Printable Layout */}
+      <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع الرسمي" size="lg">
         {receiptData && (
           <div>
-            <div id="receipt-print-area" className="p-6 bg-white text-slate-900 rounded-lg dir-rtl text-right font-sans border border-slate-200">
-              <div className="text-center mb-6 pb-4 border-b border-dashed border-slate-300">
-                <h2 className="font-bold text-2xl text-slate-900 mb-1">الرؤيا النقية للبصريات</h2>
-                <p className="text-sm text-slate-500">إيصال بيع رسمي</p>
-                <p className="text-xs text-slate-500 mt-1">{formatDateTime(receiptData.date)}</p>
-                <p className="text-xs text-slate-500">رقم الفاتورة: #{receiptData.saleId.slice(0, 8)}</p>
-                <p className="text-sm text-slate-700 font-medium mt-2">العميل: {receiptData.customer}</p>
+            <div id="receipt-print-area" className="p-8 bg-white text-slate-900 dir-rtl text-right font-sans border border-slate-300 rounded-lg">
+              
+              {/* Header */}
+              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-6">
+                <div>
+                  <h1 className="font-bold text-3xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
+                  <p className="text-sm text-slate-600 mt-1">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
+                  <p className="text-xs text-slate-500 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
+                </div>
+                <div className="text-left text-xs text-slate-600 space-y-1">
+                  <p><span className="font-semibold text-slate-800">رقم الفاتورة:</span> #{receiptData.saleId.slice(0, 8).toUpperCase()}</p>
+                  <p><span className="font-semibold text-slate-800">التاريخ والوقت:</span> {formatDateTime(receiptData.date)}</p>
+                  <p><span className="font-semibold text-slate-800">طريقة الدفع:</span> {PAYMENT_LABELS[receiptData.paymentMethod]}</p>
+                </div>
               </div>
 
+              {/* Customer Info Box */}
+              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6 flex justify-between items-center text-sm">
+                <div>
+                  <span className="text-slate-500">اسم العميل: </span>
+                  <span className="font-bold text-slate-800">{receiptData.customerName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500">رقم الهاتف: </span>
+                  <span className="font-medium text-slate-800">{receiptData.customerPhone}</span>
+                </div>
+              </div>
+
+              {/* Items Table */}
               <table className="w-full text-sm mb-6 border-collapse">
                 <thead>
-                  <tr className="border-b-2 border-slate-200 text-slate-700">
-                    <th className="text-right py-2">الصنف</th>
-                    <th className="text-center py-2">العدد</th>
-                    <th className="text-left py-2">المجموع</th>
+                  <tr className="bg-slate-100 border-y-2 border-slate-300 text-slate-800">
+                    <th className="text-right py-2.5 px-3">#</th>
+                    <th className="text-right py-2.5 px-3">السلعة / المنتج</th>
+                    <th className="text-center py-2.5 px-3">الكمية</th>
+                    <th className="text-left py-2.5 px-3">سعر الوحدة</th>
+                    <th className="text-left py-2.5 px-3">المجموع</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-200">
                   {receiptData.items.map((item: CartItem, i: number) => (
-                    <tr key={i} className="border-b border-slate-100">
-                      <td className="py-2.5 font-medium">{item.name}</td>
-                      <td className="text-center py-2.5">{item.qty}</td>
-                      <td className="text-left py-2.5 font-bold">{formatCurrency(item.price * item.qty)}</td>
+                    <tr key={i}>
+                      <td className="py-3 px-3 text-slate-400 text-xs">{i + 1}</td>
+                      <td className="py-3 px-3 font-semibold text-slate-800">{item.name}</td>
+                      <td className="py-3 px-3 text-center">{item.qty}</td>
+                      <td className="py-3 px-3 text-left font-mono">{formatCurrency(item.price)}</td>
+                      <td className="py-3 px-3 text-left font-bold font-mono text-slate-900">{formatCurrency(item.price * item.qty)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              <div className="border-t border-dashed border-slate-300 pt-4 space-y-2 text-sm">
-                <div className="flex justify-between text-slate-600">
-                  <span>المجموع الفرعي:</span>
-                  <span>{formatCurrency(receiptData.subtotal)}</span>
+              {/* Totals & Summary */}
+              <div className="flex justify-between items-start pt-4 border-t-2 border-slate-300">
+                <div className="text-xs text-slate-500 space-y-1">
+                  <p>• البضاعة المبيعة ترجع أو تستبدل خلال 3 أيام بشرط حالتها الأصلية.</p>
+                  <p>• يرجى الاحتفاظ بهذا الإيصال للمراجعة أو الصيانة.</p>
                 </div>
-                {receiptData.discount > 0 && (
-                  <div className="flex justify-between text-red-600">
-                    <span>الخصم:</span>
-                    <span>-{formatCurrency(receiptData.discount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-bold text-base text-slate-900 border-t pt-2 border-slate-200">
-                  <span>الإجمالي:</span>
-                  <span>{formatCurrency(receiptData.total)}</span>
-                </div>
-                <div className="flex justify-between text-slate-600 pt-1">
-                  <span>طريقة الدفع:</span>
-                  <span>{PAYMENT_LABELS[receiptData.paymentMethod]}</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>المدفوع:</span>
-                  <span>{formatCurrency(receiptData.amountPaid)}</span>
-                </div>
-                {receiptData.change > 0 && (
+
+                <div className="w-64 space-y-2 text-sm">
                   <div className="flex justify-between text-slate-600">
-                    <span>الباقي:</span>
-                    <span>{formatCurrency(receiptData.change)}</span>
+                    <span>المجموع الفرعي:</span>
+                    <span className="font-mono">{formatCurrency(receiptData.subtotal)}</span>
                   </div>
-                )}
+                  {receiptData.discount > 0 && (
+                    <div className="flex justify-between text-red-600 font-medium">
+                      <span>الخصم:</span>
+                      <span className="font-mono">-{formatCurrency(receiptData.discount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-base text-slate-900 border-t border-b py-2 border-slate-300">
+                    <span>الإجمالي النهائي:</span>
+                    <span className="font-mono">{formatCurrency(receiptData.total)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-700 pt-1">
+                    <span>المبلغ المدفوع:</span>
+                    <span className="font-mono font-semibold">{formatCurrency(receiptData.amountPaid)}</span>
+                  </div>
+                  {receiptData.remainingOrChange > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-semibold">
+                      <span>الباقي للعميل:</span>
+                      <span className="font-mono">{formatCurrency(receiptData.remainingOrChange)}</span>
+                    </div>
+                  )}
+                  {receiptData.remainingOrChange < 0 && (
+                    <div className="flex justify-between text-red-600 font-bold">
+                      <span>المتبقي (دين):</span>
+                      <span className="font-mono">{formatCurrency(Math.abs(receiptData.remainingOrChange))}</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="text-center text-xs text-slate-500 mt-8 pt-4 border-t border-slate-200">
-                <p>شكراً لزيارتكم — نتمنى لكم دوام الصحة</p>
+              {/* Footer */}
+              <div className="text-center text-xs text-slate-500 mt-10 pt-4 border-t border-slate-200">
+                <p className="font-semibold text-slate-700 mb-1">شكراً لتسوقكم من المركز الإيطالي للبصريات</p>
+                <p>نتمنى لكم دوام الصحة والعافية</p>
               </div>
+
             </div>
 
-            <div className="no-print mt-5 flex gap-2">
-              <button onClick={handlePrint} className="btn-primary flex-1 py-2.5">
-                <Printer className="w-4 h-4" /> طباعة الإيصال
+            {/* Print Action Buttons */}
+            <div className="no-print mt-6 flex gap-3">
+              <button onClick={handlePrint} className="btn-primary flex-1 py-3 text-base">
+                <Printer className="w-5 h-5" /> طباعة الإيصال الرسمي
               </button>
-              <button onClick={() => setShowReceipt(false)} className="btn-secondary flex-1 py-2.5">
+              <button onClick={() => setShowReceipt(false)} className="btn-secondary px-6 py-3">
                 إغلاق
               </button>
             </div>
