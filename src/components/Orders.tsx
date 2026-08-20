@@ -20,6 +20,7 @@ import {
   formatCurrency,
   formatDate,
   ORDER_STATUS_LABELS,
+  PAYMENT_LABELS,
   type Order,
   type OrderStatus,
   type Customer,
@@ -64,6 +65,7 @@ const emptyForm = {
   },
   notes: '',
   amount_paid: 0,
+  payment_method: 'cash' as 'cash' | 'card' | 'transfer',
   items: [] as OrderItemForm[],
 };
 
@@ -153,6 +155,7 @@ export default function Orders() {
       lens_details: (order as any).lens_details || emptyForm.lens_details,
       notes: order.notes || '',
       amount_paid: order.amount_paid || 0,
+      payment_method: (order as any).payment_method || 'cash',
       items: (items || []).map((i) => ({
         item_name: i.item_name,
         item_type: i.item_type,
@@ -191,7 +194,7 @@ export default function Orders() {
   }
 
   // =========================================================
-  // دالة الحفظ المعدلة: ربط الشؤون المالية والديون التلقائية
+  // دالة الحفظ المعدلة: ربط الشؤون المالية والديون وتحديد طريقة الدفع
   // =========================================================
   async function save() {
     if (!form.customer_id) {
@@ -201,7 +204,7 @@ export default function Orders() {
 
     const total = form.items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.quantity) || 1), 0);
     const paid = Number(form.amount_paid) || 0;
-    const remaining = Math.max(0, total - paid); // حساب الدين المتبقي
+    const remaining = Math.max(0, total - paid);
 
     const orderPayload: Record<string, any> = {
       customer_id: form.customer_id,
@@ -209,6 +212,7 @@ export default function Orders() {
       status: editingOrder?.status || 'pending',
       total_amount: total,
       amount_paid: paid,
+      payment_method: form.payment_method, // تم إضافة حقل طريقة الدفع ليتطابق مع المحاسبة
       notes: form.notes ? form.notes : null,
     };
 
@@ -249,23 +253,21 @@ export default function Orders() {
       await supabase.from('order_items').insert(itemsPayload);
     }
 
-    // 2. ربط المدفوعات المالية والديون (للمقبوضات والتقرير المالي للإنستغرام/الموقع)
+    // 2. ربط المدفوعات المالية والديون
     try {
-      // أ) إضافة المدفوع كإيراد مالـي مقبول للـ Dashboard
       if (paid > 0 && orderId) {
         await supabase.from('payments').insert({
           order_id: orderId,
           customer_id: form.customer_id,
           amount: paid,
           payment_type: 'income',
+          payment_method: form.payment_method,
           description: `دفعة مقدمة لطلبية نظارة #${orderId.slice(0, 8)}`,
           created_at: new Date().toISOString(),
         });
       }
 
-      // ب) إضافة باقي المبلغ كـ دين مستحق على العميل وتحديث حسابه
       if (remaining > 0 && orderId) {
-        // إضافة سجل في جدول الديون
         await supabase.from('debts').insert({
           customer_id: form.customer_id,
           order_id: orderId,
@@ -275,7 +277,6 @@ export default function Orders() {
           created_at: new Date().toISOString(),
         });
 
-        // تحديث إجمالي الدين بجدول العملاء (في حال كان الجدول يتضمن حقل debt_amount أو balance)
         const { data: custData } = await supabase
           .from('customers')
           .select('debt_amount')
@@ -672,7 +673,7 @@ export default function Orders() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="label">الدفعة المقدمة (المدفوع)</label>
               <div className="relative">
@@ -687,12 +688,24 @@ export default function Orders() {
               </div>
             </div>
             <div>
+              <label className="label">طريقة الدفع</label>
+              <select
+                value={form.payment_method}
+                onChange={(e) => setForm({ ...form, payment_method: e.target.value as any })}
+                className="input"
+              >
+                <option value="cash">نقدي (كاش)</option>
+                <option value="card">بطاقة (فيزا/ماستر)</option>
+                <option value="transfer">تحويل بنكي</option>
+              </select>
+            </div>
+            <div>
               <label className="label">ملاحظات المعمل والطلب</label>
               <textarea
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 className="input min-h-[40px] text-xs"
-                placeholder="أي ملاحظات خاصة بالتنفيذ أو قياسات الإطار..."
+                placeholder="أي ملاحظات خاصة بالتنفيذ..."
               />
             </div>
           </div>
@@ -713,10 +726,7 @@ export default function Orders() {
               </button>
             </div>
 
-            {/* الإيصال الشامل القابل للطباعة والمعاينة */}
             <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-              
-              {/* هيدر الفاتورة مع اللوجو */}
               <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-4 mb-4 flex flex-col items-center justify-center">
                 <img 
                   src="/logo.png" 
@@ -743,9 +753,11 @@ export default function Orders() {
                 <div>
                   <span className="text-slate-500 dark:text-slate-400">حالة التصنيع:</span> <strong className="text-slate-900 dark:text-slate-100">{ORDER_STATUS_LABELS[viewOrder.status]}</strong>
                 </div>
+                <div>
+                  <span className="text-slate-500 dark:text-slate-400">طريقة الدفع:</span> <strong className="text-slate-900 dark:text-slate-100">{PAYMENT_LABELS[(viewOrder as any).payment_method] || (viewOrder as any).payment_method || 'نقدي'}</strong>
+                </div>
               </div>
 
-              {/* قسم الوصفة الطبية (الفحص الكامل) */}
               <div className="mb-4 border border-brand-200 dark:border-brand-900/50 p-3 rounded bg-brand-50/20 dark:bg-brand-950/20">
                 <div className="font-semibold text-brand-700 dark:text-brand-300 mb-2 text-xs flex items-center justify-between">
                   <span className="flex items-center gap-1">
@@ -809,7 +821,6 @@ export default function Orders() {
                 </div>
               </div>
 
-              {/* عناصر الأصناف بالنظارة */}
               {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
                 <table className="w-full text-right text-xs mb-4 border-collapse border border-slate-200 dark:border-slate-700">
                   <thead>
@@ -837,7 +848,6 @@ export default function Orders() {
                 </p>
               )}
 
-              {/* الحسابات المادية */}
               <div className="border-t border-slate-200 dark:border-slate-700 pt-3 text-xs space-y-1.5">
                 <div className="flex justify-between font-bold text-sm">
                   <span>المجموع الكلي:</span>
@@ -869,7 +879,6 @@ export default function Orders() {
         )}
       </Modal>
 
-      {/* التنسيقات المخصصة للطباعة */}
       <style>{`
         @media print {
           body * {
