@@ -9,7 +9,6 @@ import {
   Minus,
   UserPlus,
   CheckCircle,
-  Download,
 } from 'lucide-react';
 import {
   supabase,
@@ -131,10 +130,11 @@ export default function POS() {
     setProcessing(true);
 
     try {
+      // 1. إنشاء سجل المبيعات الرئيسي
       const { data: sale, error: saleErr } = await supabase
         .from('sales')
         .insert({
-          customer_id: selectedCustomer,
+          customer_id: selectedCustomer || null,
           subtotal,
           discount: discountNum,
           tax: 0,
@@ -146,31 +146,58 @@ export default function POS() {
         .select()
         .single();
 
-      if (saleErr) throw saleErr;
+      if (saleErr) {
+        console.error('فشل إنشاء سجل المبيعات (Sales):', saleErr);
+        throw saleErr;
+      }
 
-      const saleItems = cart.map((c) => ({
-        sale_id: sale.id,
-        inventory_id: c.inventory_id,
-        item_name: c.name,
-        barcode: c.barcode,
-        quantity: c.qty,
-        unit_price: c.price,
-        line_total: c.price * c.qty,
-      }));
+      // 2. تجهيز عناصر السلة للإدراج ومنع إرسال قيم null مسببة للخطأ
+      const saleItems = cart.map((c) => {
+        const itemData: any = {
+          sale_id: sale.id,
+          item_name: c.name || 'منتج',
+          barcode: c.barcode || '',
+          quantity: Number(c.qty),
+          unit_price: Number(c.price),
+          line_total: Number(c.price * c.qty),
+        };
 
-      const { error: itemsErr } = await supabase.from('sale_items').insert(saleItems);
-      if (itemsErr) throw itemsErr;
+        if (c.inventory_id) {
+          itemData.inventory_id = c.inventory_id;
+        }
 
+        return itemData;
+      });
+
+      // 3. إدراج العناصر في جدول sale_items
+      const { error: itemsErr } = await supabase
+        .from('sale_items')
+        .insert(saleItems);
+
+      if (itemsErr) {
+        console.error('تفاصيل خطأ sale_items:', {
+          message: itemsErr.message,
+          details: itemsErr.details,
+          hint: itemsErr.hint,
+          code: itemsErr.code,
+        });
+        throw itemsErr;
+      }
+
+      // 4. تحديث الكميات في المخزون
       for (const item of cart) {
-        const inv = inventory.find((i) => i.id === item.inventory_id);
-        if (inv) {
-          await supabase
-            .from('inventory')
-            .update({ quantity: inv.quantity - item.qty })
-            .eq('id', item.inventory_id);
+        if (item.inventory_id) {
+          const inv = inventory.find((i) => i.id === item.inventory_id);
+          if (inv) {
+            await supabase
+              .from('inventory')
+              .update({ quantity: Math.max(0, inv.quantity - item.qty) })
+              .eq('id', item.inventory_id);
+          }
         }
       }
 
+      // 5. إعداد الإيصال وتفريغ السلة
       const customer = customers.find((c) => c.id === selectedCustomer);
 
       setReceiptData({
@@ -193,11 +220,19 @@ export default function POS() {
       setAmountPaid('');
       setPaymentMethod('cash');
 
-      const { data: newInv } = await supabase.from('inventory').select('*').gt('quantity', 0).order('name');
+      // إعادة تحميل المخزون لتحديث الشاشة
+      const { data: newInv } = await supabase
+        .from('inventory')
+        .select('*')
+        .gt('quantity', 0)
+        .order('name');
       setInventory(newInv || []);
+
     } catch (err: any) {
-      console.error('Sale Error:', err);
-      alert('حدث خطأ أثناء إتمام البيع: ' + (err.message || err.error_description || JSON.stringify(err)));
+      console.error('Sale Processing Error:', err);
+      alert(
+        `حدث خطأ أثناء إتمام البيع:\n${err.message || 'يرجى التحقق من صحة البيانات أو قيود المفاتيح في Supabase'}`
+      );
     } finally {
       setProcessing(false);
     }
