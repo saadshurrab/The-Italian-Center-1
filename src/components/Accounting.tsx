@@ -29,6 +29,13 @@ interface CashRegister {
   register_date: string;
 }
 
+interface SaleRecord {
+  id?: string;
+  total?: number;
+  payment_method?: string;
+  created_at: string;
+}
+
 interface OrderRecord {
   id: string;
   total_amount?: number;
@@ -41,17 +48,17 @@ interface OrderRecord {
 }
 
 export default function Accounting() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'expenses' | 'cash'>('overview');
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [cashRegisters, setCashRegisters] = useState<CashRegister[]>([]);
-  const [sales, setSales] = useState<any[]>([]);
+  const [sales, setSales] = useState<SaleRecord[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
 
-  const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [showCashModal, setShowCashModal] = useState(false);
-  const [expenseSearch, setExpenseSearch] = useState('');
+  const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
+  const [showCashModal, setShowCashModal] = useState<boolean>(false);
+  const [expenseSearch, setExpenseSearch] = useState<string>('');
 
   const [expenseForm, setExpenseForm] = useState({
     category: 'مشتريات وبضاعة',
@@ -74,8 +81,7 @@ export default function Accounting() {
       const [expRes, cashRes, salesRes, ordersRes] = await Promise.all([
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
-        supabase.from('sales').select('total, payment_method, created_at').order('created_at', { ascending: false }),
-        // جلب جميع حقول المبالغ المحتملة للطلبيات
+        supabase.from('sales').select('id, total, payment_method, created_at').order('created_at', { ascending: false }),
         supabase.from('orders').select('id, total_amount, total, amount_paid, paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
       ]);
 
