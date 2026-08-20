@@ -190,6 +190,9 @@ export default function Orders() {
     setForm((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
   }
 
+  // =========================================================
+  // دالة الحفظ المعدلة: ربط الشؤون المالية والديون التلقائية
+  // =========================================================
   async function save() {
     if (!form.customer_id) {
       alert('الرجاء اختيار العميل');
@@ -198,6 +201,7 @@ export default function Orders() {
 
     const total = form.items.reduce((s, i) => s + (Number(i.unit_price) || 0) * (Number(i.quantity) || 1), 0);
     const paid = Number(form.amount_paid) || 0;
+    const remaining = Math.max(0, total - paid); // حساب الدين المتبقي
 
     const orderPayload: Record<string, any> = {
       customer_id: form.customer_id,
@@ -230,6 +234,7 @@ export default function Orders() {
       orderId = data.id;
     }
 
+    // 1. إضافة عناصر الطلبية
     if (form.items.length > 0 && orderId) {
       const itemsPayload = form.items.map((i) => ({
         order_id: orderId,
@@ -242,6 +247,49 @@ export default function Orders() {
       }));
 
       await supabase.from('order_items').insert(itemsPayload);
+    }
+
+    // 2. ربط المدفوعات المالية والديون (للمقبوضات والتقرير المالي للإنستغرام/الموقع)
+    try {
+      // أ) إضافة المدفوع كإيراد مالـي مقبول للـ Dashboard
+      if (paid > 0 && orderId) {
+        await supabase.from('payments').insert({
+          order_id: orderId,
+          customer_id: form.customer_id,
+          amount: paid,
+          payment_type: 'income',
+          description: `دفعة مقدمة لطلبية نظارة #${orderId.slice(0, 8)}`,
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      // ب) إضافة باقي المبلغ كـ دين مستحق على العميل وتحديث حسابه
+      if (remaining > 0 && orderId) {
+        // إضافة سجل في جدول الديون
+        await supabase.from('debts').insert({
+          customer_id: form.customer_id,
+          order_id: orderId,
+          amount: remaining,
+          status: 'unpaid',
+          description: `دين متبقي من طلبية نظارة #${orderId.slice(0, 8)}`,
+          created_at: new Date().toISOString(),
+        });
+
+        // تحديث إجمالي الدين بجدول العملاء (في حال كان الجدول يتضمن حقل debt_amount أو balance)
+        const { data: custData } = await supabase
+          .from('customers')
+          .select('debt_amount')
+          .eq('id', form.customer_id)
+          .maybeSingle();
+
+        const currentDebt = Number(custData?.debt_amount) || 0;
+        await supabase
+          .from('customers')
+          .update({ debt_amount: currentDebt + remaining })
+          .eq('id', form.customer_id);
+      }
+    } catch (finErr) {
+      console.error('خطأ في معالجة الربط المالي والدين:', finErr);
     }
 
     await fetchOrdersData();
