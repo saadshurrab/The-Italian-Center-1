@@ -239,51 +239,51 @@ export default function POS() {
     }
   }
 
+  // طريقة الطباعة المستقلة النظيفة تماماً
   const handlePrint = () => {
-    window.print();
+    const printContent = document.getElementById('receipt-printable-content');
+    if (!printContent) return;
+
+    const winUrl = '';
+    const winName = '_blank';
+    const printWindow = window.open(winUrl, winName, 'left=100,top=100,width=800,height=900,toolbar=0,scrollbars=0,status=0');
+
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+          <title>فاتورة - المركز الإيطالي للبصريات</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 10mm;
+            }
+            body {
+              font-family: system-ui, -apple-system, sans-serif;
+              background: #fff !important;
+              color: #000 !important;
+              padding: 0;
+              margin: 0;
+            }
+          </style>
+        </head>
+        <body onload="window.print(); setTimeout(function(){ window.close(); }, 500);">
+          <div style="padding: 10px;">
+            ${printContent.innerHTML}
+          </div>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
   };
 
   if (loading) return <LoadingSpinner />;
 
   return (
     <div>
-      {/* تنسيق الطباعة النهائي المعالج بالكامل */}
-      <style>{`
-        @page {
-          size: auto;
-          margin: 0mm; /* لإخفاء رأس وذيل المتصفح مثل التاريخ ورابط الموقع */
-        }
-        @media print {
-          body {
-            background: #fff !important;
-            color: #000 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          /* إخفاء كل العناصر بالصفحة عدا منطقة الفاتورة */
-          body * {
-            visibility: hidden !important;
-          }
-          #receipt-print-area, #receipt-print-area * {
-            visibility: visible !important;
-          }
-          #receipt-print-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 15mm !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
-
       <PageHeader title="الكاشير والباركود" subtitle="إدارة المبيعات ودعم الباركود" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -483,23 +483,24 @@ export default function POS() {
         </div>
       </Modal>
 
-      {/* Modal & Receipts */}
+      {/* Receipt Modal */}
       <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع الرسمي" size="lg">
         {receiptData && (
           <div>
-            <div id="receipt-print-area" className="p-6 bg-white text-slate-900 dir-rtl text-right font-sans border border-slate-200 rounded-lg">
+            {/* القالب الذي سينسخ ويطبع مباشرة بكل دقّة */}
+            <div id="receipt-printable-content" className="p-6 bg-white text-slate-900 dir-rtl text-right border border-slate-200 rounded-xl">
               
               {/* Header */}
-              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-4">
+              <div className="flex justify-between items-start border-b-2 border-slate-900 pb-4 mb-4">
                 <div>
-                  <h1 className="font-bold text-2xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
-                  <p className="text-xs text-slate-600 mt-1">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
+                  <h1 className="font-extrabold text-2xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
+                  <p className="text-xs text-slate-600 mt-1 font-medium">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
                 </div>
-                <div className="text-left text-xs text-slate-600 space-y-1">
-                  <p><span className="font-semibold text-slate-800">رقم الفاتورة:</span> #{receiptData.saleId.slice(0, 8).toUpperCase()}</p>
-                  <p><span className="font-semibold text-slate-800">التاريخ والوقت:</span> {formatDateTime(receiptData.date)}</p>
-                  <p><span className="font-semibold text-slate-800">طريقة الدفع:</span> {PAYMENT_LABELS[receiptData.paymentMethod]}</p>
+                <div className="text-left text-xs text-slate-700 space-y-1">
+                  <p><span className="font-bold text-slate-900">رقم الفاتورة:</span> #{receiptData.saleId.slice(0, 8).toUpperCase()}</p>
+                  <p><span className="font-bold text-slate-900">التاريخ والوقت:</span> {formatDateTime(receiptData.date)}</p>
+                  <p><span className="font-bold text-slate-900">طريقة الدفع:</span> {PAYMENT_LABELS[receiptData.paymentMethod]}</p>
                 </div>
               </div>
 
@@ -507,15 +508,15 @@ export default function POS() {
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 flex justify-between items-center text-xs">
                 <div>
                   <span className="text-slate-500">اسم العميل: </span>
-                  <span className="font-bold text-slate-800">{receiptData.customerName}</span>
+                  <span className="font-bold text-slate-900">{receiptData.customerName}</span>
                 </div>
                 <div>
                   <span className="text-slate-500">رقم الهاتف: </span>
-                  <span className="font-medium text-slate-800">{receiptData.customerPhone}</span>
+                  <span className="font-medium text-slate-900">{receiptData.customerPhone}</span>
                 </div>
               </div>
 
-              {/* Table */}
+              {/* Items Table */}
               <table className="w-full text-xs mb-4 border-collapse">
                 <thead>
                   <tr className="bg-slate-100 border-y border-slate-300 text-slate-800">
@@ -529,19 +530,19 @@ export default function POS() {
                 <tbody className="divide-y divide-slate-200">
                   {receiptData.items.map((item: CartItem, i: number) => (
                     <tr key={i}>
-                      <td className="py-2 px-2 text-slate-400">{i + 1}</td>
-                      <td className="py-2 px-2 font-semibold text-slate-800">{item.name}</td>
-                      <td className="py-2 px-2 text-center">{item.qty}</td>
-                      <td className="py-2 px-2 text-left font-mono">{formatCurrency(item.price)}</td>
-                      <td className="py-2 px-2 text-left font-bold font-mono text-slate-900">{formatCurrency(item.price * item.qty)}</td>
+                      <td className="py-2.5 px-2 text-slate-400">{i + 1}</td>
+                      <td className="py-2.5 px-2 font-bold text-slate-800">{item.name}</td>
+                      <td className="py-2.5 px-2 text-center font-medium">{item.qty}</td>
+                      <td className="py-2.5 px-2 text-left font-mono">{formatCurrency(item.price)}</td>
+                      <td className="py-2.5 px-2 text-left font-bold font-mono text-slate-900">{formatCurrency(item.price * item.qty)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              {/* Totals */}
+              {/* Totals & Notes */}
               <div className="flex justify-between items-start pt-3 border-t-2 border-slate-300">
-                <div className="text-[11px] text-slate-500 space-y-1">
+                <div className="text-[11px] text-slate-500 space-y-1 max-w-[260px]">
                   <p>• البضاعة المبيعة ترجع أو تستبدل خلال 3 أيام بشرط حالتها الأصلية.</p>
                   <p>• يرجى الاحتفاظ بهذا الإيصال للمراجعة.</p>
                 </div>
@@ -557,16 +558,16 @@ export default function POS() {
                       <span className="font-mono">-{formatCurrency(receiptData.discount)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between font-bold text-sm text-slate-900 border-t border-b py-1.5 border-slate-300">
+                  <div className="flex justify-between font-extrabold text-sm text-slate-900 border-t border-b py-1.5 border-slate-300">
                     <span>الإجمالي النهائي:</span>
                     <span className="font-mono">{formatCurrency(receiptData.total)}</span>
                   </div>
                   <div className="flex justify-between text-slate-700 pt-0.5">
                     <span>المبلغ المدفوع:</span>
-                    <span className="font-mono font-semibold">{formatCurrency(receiptData.amountPaid)}</span>
+                    <span className="font-mono font-bold">{formatCurrency(receiptData.amountPaid)}</span>
                   </div>
                   {receiptData.remainingOrChange > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-semibold">
+                    <div className="flex justify-between text-emerald-700 font-bold">
                       <span>الباقي للعميل:</span>
                       <span className="font-mono">{formatCurrency(receiptData.remainingOrChange)}</span>
                     </div>
@@ -582,13 +583,13 @@ export default function POS() {
 
               {/* Footer */}
               <div className="text-center text-[11px] text-slate-500 mt-6 pt-3 border-t border-slate-200">
-                <p className="font-semibold text-slate-700 mb-0.5">شكراً لتسوقكم من المركز الإيطالي للبصريات</p>
+                <p className="font-bold text-slate-800 mb-0.5">شكراً لتسوقكم من المركز الإيطالي للبصريات</p>
                 <p>نتمنى لكم دوام الصحة والعافية</p>
               </div>
 
             </div>
 
-            <div className="no-print mt-6 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button onClick={handlePrint} className="btn-primary flex-1 py-3 text-base">
                 <Printer className="w-5 h-5" /> طباعة الإيصال الرسمي
               </button>
