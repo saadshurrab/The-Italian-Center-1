@@ -114,7 +114,6 @@ export default function POS() {
       addToCart(item);
       setBarcodeInput('');
     } else {
-      // Flash error state
       barcodeRef.current?.classList.add('border-error-500');
       setTimeout(() => barcodeRef.current?.classList.remove('border-error-500'), 600);
     }
@@ -131,17 +130,22 @@ export default function POS() {
     setProcessing(true);
 
     try {
+      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+      const actualPaid = paymentMethod === 'cash' ? paid : (paymentMethod === 'card' ? total : paid);
+
       const { data: sale, error: saleErr } = await supabase
         .from('sales')
         .insert({
+          invoice_number: invoiceNumber,
           customer_id: selectedCustomer,
           subtotal,
           discount: discountNum,
           tax: 0,
           total,
           payment_method: paymentMethod,
-          amount_paid: paymentMethod === 'cash' ? paid : total,
+          amount_paid: actualPaid,
           change_due: change,
+          status: 'completed',
         })
         .select()
         .single();
@@ -158,9 +162,9 @@ export default function POS() {
         line_total: c.price * c.qty,
       }));
 
-      await supabase.from('sale_items').insert(saleItems);
+      const { error: itemsErr } = await supabase.from('sale_items').insert(saleItems);
+      if (itemsErr) throw itemsErr;
 
-      // Deduct from inventory
       for (const item of cart) {
         const inv = inventory.find((i) => i.id === item.inventory_id);
         if (inv) {
@@ -171,30 +175,41 @@ export default function POS() {
         }
       }
 
+      if (selectedCustomer && (paymentMethod === 'partial' || actualPaid < total)) {
+        const remainingBalance = total - actualPaid;
+        const customerObj = customers.find((c) => c.id === selectedCustomer);
+        if (customerObj) {
+          const currentBalance = (customerObj as any).balance || 0;
+          await supabase
+            .from('customers')
+            .update({ balance: currentBalance + remainingBalance })
+            .eq('id', selectedCustomer);
+        }
+      }
+
       const customer = customers.find((c) => c.id === selectedCustomer);
 
       setReceiptData({
         saleId: sale.id,
+        invoiceNumber,
         items: cart,
         subtotal,
         discount: discountNum,
         total,
         paymentMethod,
-        amountPaid: paymentMethod === 'cash' ? paid : total,
+        amountPaid: actualPaid,
         change,
         customer: customer?.name || 'عميل نقدي',
         date: new Date().toISOString(),
       });
       setShowReceipt(true);
 
-      // Reset
       setCart([]);
       setSelectedCustomer(null);
       setDiscount('');
       setAmountPaid('');
       setPaymentMethod('cash');
 
-      // Refresh inventory
       const { data: newInv } = await supabase.from('inventory').select('*').gt('quantity', 0).order('name');
       setInventory(newInv || []);
     } catch (err) {
@@ -388,7 +403,7 @@ export default function POS() {
               </div>
             </div>
 
-            {paymentMethod === 'cash' && (
+            {(paymentMethod === 'cash' || paymentMethod === 'partial') && (
               <div>
                 <label className="label">المبلغ المدفوع</label>
                 <input
@@ -398,9 +413,14 @@ export default function POS() {
                   placeholder={total.toString()}
                   className="input text-left"
                 />
-                {paid > 0 && (
+                {paymentMethod === 'cash' && paid > 0 && (
                   <p className="text-sm text-accent-600 dark:text-accent-400 mt-1">
                     الباقي: {formatCurrency(change)}
+                  </p>
+                )}
+                {paymentMethod === 'partial' && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                    المتبقي كدين: {formatCurrency(Math.max(0, total - paid))}
                   </p>
                 )}
               </div>
@@ -411,7 +431,7 @@ export default function POS() {
               disabled={cart.length === 0 || processing}
               className="btn-primary w-full text-base py-3"
             >
-              {processing ? 'جاري المعالجة...' : 'إتمام البيع'}
+              {processing ? 'جاري المعالجة...' : 'إتمام البيع وحفظ الفاتورة'}
             </button>
           </div>
         </div>
@@ -440,10 +460,9 @@ export default function POS() {
           <div>
             <div className="print-area text-center">
               <div className="mb-4 pb-3 border-b border-dashed border-slate-300 dark:border-slate-600">
-                <h2 className="font-display font-bold text-lg text-slate-800 dark:text-white">المركز الإيطالي للبصريات</h2>
-                <p className="text-xs text-slate-400 mt-1">إيصال بيع</p>
+                <h2 className="font-display font-bold text-lg text-slate-800 dark:text-white">إيصال مبيعات</h2>
+                <p className="text-xs text-slate-400 mt-1">رقم الفاتورة: {receiptData.invoiceNumber}</p>
                 <p className="text-xs text-slate-400">{formatDateTime(receiptData.date)}</p>
-                <p className="text-xs text-slate-400">رقم: {receiptData.saleId.slice(0, 8)}</p>
                 <p className="text-xs text-slate-400">العميل: {receiptData.customer}</p>
               </div>
               <div className="space-y-2 mb-4 text-right">
@@ -469,7 +488,7 @@ export default function POS() {
                   <div className="flex justify-between"><span className="text-slate-400">الباقي</span><span>{formatCurrency(receiptData.change)}</span></div>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-6">شكراً لزيارتكم — نتمنى لكم دوام الصحة</p>
+              <p className="text-xs text-slate-400 mt-6">شكراً لزيارتكم</p>
             </div>
             <div className="no-print mt-4 flex gap-2">
               <button onClick={() => window.print()} className="btn-primary flex-1">
