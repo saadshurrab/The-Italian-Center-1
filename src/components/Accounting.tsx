@@ -22,12 +22,21 @@ interface SaleRecord {
   created_at: string;
 }
 
+interface OrderRecord {
+  id?: string;
+  paid_amount?: number;
+  paid?: number;
+  payment_method?: string;
+  created_at: string;
+}
+
 export default function Accounting() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'overview' | 'cash' | 'expenses'>('overview');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [cashEntries, setCashEntries] = useState<CashRegister[]>([]);
   const [sales, setSales] = useState<SaleRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState<string>('all');
@@ -54,16 +63,18 @@ export default function Accounting() {
 
   const fetchData = async () => {
     try {
-      const [expRes, cashRes, salesRes, empRes] = await Promise.all([
+      const [expRes, cashRes, salesRes, ordersRes, empRes] = await Promise.all([
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
         supabase.from('sales').select('total, payment_method, created_at').order('created_at', { ascending: false }),
+        supabase.from('orders').select('paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
         supabase.from('employees').select('*').order('name'),
       ]);
 
       setExpenses(expRes.data || []);
       setCashEntries(cashRes.data || []);
       setSales(salesRes.data || []);
+      setOrders(ordersRes.data || []);
       setEmployees(empRes.data || []);
     } catch (err) {
       console.error('Error fetching accounting data:', err);
@@ -76,19 +87,32 @@ export default function Accounting() {
     fetchData();
   }, []);
 
-  // احتساب بداية اليوم وبداية الشهر
+  // تحديد بداية اليوم وبداية الشهر بالوقيت المحلي
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-  // حساب المبيعات اليومية والشهرية من جدول sales
-  const monthSales = sales
+  // حساب مبيعات جدول sales
+  const monthSalesCount = sales
     .filter((s) => s.created_at >= monthStart)
     .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-  const todaySales = sales
+  const todaySalesCount = sales
     .filter((s) => s.created_at >= todayStart)
     .reduce((sum, s) => sum + Number(s.total || 0), 0);
+
+  // حساب مدفوعات الطلبيات والتصنيع (الـ 200 شيكل والمدفوعات الأخرى)
+  const monthOrdersPaid = orders
+    .filter((o) => o.created_at >= monthStart)
+    .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
+
+  const todayOrdersPaid = orders
+    .filter((o) => o.created_at >= todayStart)
+    .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
+
+  // إجمالي المقبوضات (المبيعات + مدفوعات الطلبيات)
+  const monthSales = monthSalesCount + monthOrdersPaid;
+  const todaySales = todaySalesCount + todayOrdersPaid;
 
   const monthExpenses = expenses
     .filter((e) => e.expense_date >= monthStart.slice(0, 10))
@@ -181,13 +205,18 @@ export default function Accounting() {
             <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">المبيعات حسب طريقة الدفع (الشهر الحالي)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {(['cash', 'card', 'transfer', 'partial', 'installment'] as const).map((m) => {
-                const total = sales
+                const salesTotal = sales
                   .filter((s) => s.payment_method === m && s.created_at >= monthStart)
                   .reduce((sum, s) => sum + Number(s.total || 0), 0);
+                
+                const ordersTotal = orders
+                  .filter((o) => (o.payment_method === m || (!o.payment_method && m === 'cash')) && o.created_at >= monthStart)
+                  .reduce((sum, o) => sum + Number(o.paid_amount ?? o.paid ?? 0), 0);
+
                 return (
                   <div key={m} className="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40">
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{PAYMENT_LABELS[m] || m}</p>
-                    <p className="text-lg font-bold text-slate-800 dark:text-white">{formatCurrency(total)}</p>
+                    <p className="text-lg font-bold text-slate-800 dark:text-white">{formatCurrency(salesTotal + ordersTotal)}</p>
                   </div>
                 );
               })}
