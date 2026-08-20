@@ -3,14 +3,9 @@ import {
   DollarSign,
   TrendingUp,
   TrendingDown,
-  Calendar,
-  CreditCard,
   Wallet,
-  ArrowUpRight,
-  ArrowDownRight,
   Plus,
   Search,
-  Filter,
 } from 'lucide-react';
 import { supabase, formatCurrency, formatDate, PAYMENT_LABELS } from '@/lib/supabase';
 import { PageHeader, Modal, Badge, LoadingSpinner, EmptyState } from '@/components/ui';
@@ -36,6 +31,8 @@ interface CashRegister {
 
 interface OrderRecord {
   id: string;
+  total_amount?: number;
+  total?: number;
   amount_paid?: number;
   paid_amount?: number;
   paid?: number;
@@ -47,13 +44,11 @@ export default function Accounting() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'expenses' | 'cash'>('overview');
 
-  // البيانات المالية
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [cashRegisters, setCashRegisters] = useState<CashRegister[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
 
-  // الفلاتر ونماذج الإدخال
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
   const [expenseSearch, setExpenseSearch] = useState('');
@@ -80,8 +75,8 @@ export default function Accounting() {
         supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
         supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
         supabase.from('sales').select('total, payment_method, created_at').order('created_at', { ascending: false }),
-        // جلب الحقول المناسبة بما فيها amount_paid للربط الدقيق مع ملف الطلبيات
-        supabase.from('orders').select('id, amount_paid, paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
+        // جلب جميع حقول المبالغ المحتملة للطلبيات
+        supabase.from('orders').select('id, total_amount, total, amount_paid, paid_amount, paid, payment_method, created_at').order('created_at', { ascending: false }),
       ]);
 
       if (expRes.error) throw expRes.error;
@@ -103,12 +98,11 @@ export default function Accounting() {
     fetchData();
   }, []);
 
-  // حساب النطاقات الزمنية (اليوم والشهر الحالي)
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-  // حساب المبيعات والمدفوعات
+  // 1. حساب مبيعات المعرض المباشرة
   const monthSalesTotal = sales
     .filter((s) => s.created_at >= monthStart)
     .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
@@ -117,7 +111,12 @@ export default function Accounting() {
     .filter((s) => s.created_at >= todayStart)
     .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-  // حساب المقبوضات الفعلية من الطلبيات (تراعي جميع تسميات الحقول الممكنة)
+  // 2. حساب إجمالي قيم الطلبيات (المبلغ الكلي لكل طلبية)
+  const monthOrdersTotalAmount = orders
+    .filter((o) => o.created_at >= monthStart)
+    .reduce((sum, o) => sum + Number(o.total_amount ?? o.total ?? 0), 0);
+
+  // 3. حساب المقبوضات الفعلية المدفوعة من الطلبيات
   const monthOrdersPaid = orders
     .filter((o) => o.created_at >= monthStart)
     .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
@@ -126,7 +125,7 @@ export default function Accounting() {
     .filter((o) => o.created_at >= todayStart)
     .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
 
-  // إجمالي الإيرادات
+  // 4. المجموع الإجمالي للإيرادات المقبوضة (المبيعات + مدفوعات الطلبيات)
   const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
   const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
@@ -143,11 +142,11 @@ export default function Accounting() {
   const monthNetProfit = monthTotalRevenue - monthExpensesTotal;
   const todayNetProfit = todayTotalRevenue - todayExpensesTotal;
 
-  // المبيعات حسب طرق الدفع (كاش / كارت / تحويل)
+  // تجميع المبيعات حسب طرق الدفع
   const paymentStats = [...sales, ...orders].reduce(
     (acc, item) => {
       const method = item.payment_method || 'cash';
-      const amount = Number(item.total ?? item.amount_paid ?? item.paid_amount ?? item.paid ?? 0);
+      const amount = Number(item.amount_paid ?? item.paid_amount ?? item.paid ?? item.total ?? 0);
       if (method === 'cash') acc.cash += amount;
       else if (method === 'card') acc.card += amount;
       else if (method === 'transfer') acc.transfer += amount;
@@ -156,7 +155,6 @@ export default function Accounting() {
     { cash: 0, card: 0, transfer: 0 }
   );
 
-  // حفظ مصورف جديد
   const handleSaveExpense = async () => {
     if (!expenseForm.amount || Number(expenseForm.amount) <= 0) {
       alert('يرجى إدخال مبلغ صحيح للمصروف');
@@ -188,7 +186,6 @@ export default function Accounting() {
     }
   };
 
-  // تسجيل إغلاق/تسوية الصندوق
   const handleSaveCashRegister = async () => {
     const opening = Number(cashForm.opening_balance) || 0;
     const closing = Number(cashForm.closing_balance) || 0;
@@ -243,7 +240,6 @@ export default function Accounting() {
         }
       />
 
-      {/* التبويبات الرئيسة */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
         <button
           onClick={() => setActiveTab('overview')}
@@ -279,16 +275,15 @@ export default function Accounting() {
 
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* كروت المؤشرات الأساسية */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="card p-4 flex items-center gap-4">
               <div className="w-12 h-12 rounded-xl bg-accent-100 dark:bg-accent-900/40 text-accent-600 dark:text-accent-400 flex items-center justify-center">
                 <TrendingUp className="w-6 h-6" />
               </div>
               <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">إيرادات الشهر الحالي</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">إجمالي المقبوضات الإجمالية</p>
                 <p className="text-xl font-bold text-slate-900 dark:text-white">{formatCurrency(monthTotalRevenue)}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">اليوم: {formatCurrency(todayTotalRevenue)}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">مقبوضات اليوم: {formatCurrency(todayTotalRevenue)}</p>
               </div>
             </div>
 
@@ -330,7 +325,6 @@ export default function Accounting() {
             </div>
           </div>
 
-          {/* تفاصيل المبيعات وطرق الدفع */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="card p-5 lg:col-span-2 space-y-4">
               <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">المبيعات والمقبوضات حسب طريقة الدفع</h3>
@@ -351,19 +345,23 @@ export default function Accounting() {
             </div>
 
             <div className="card p-5 space-y-4">
-              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">ملخص عمليات الشهر</h3>
+              <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">تفاصيل مقبوضات الشهر</h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
-                  <span className="text-slate-500">إجمالي مبيعات المعرض:</span>
+                  <span className="text-slate-500">مبيعات المعرض المباشرة:</span>
                   <span className="font-semibold">{formatCurrency(monthSalesTotal)}</span>
                 </div>
                 <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
-                  <span className="text-slate-500">دفوعات ومقدمات الطلبيات:</span>
-                  <span className="font-semibold text-accent-600">{formatCurrency(monthOrdersPaid)}</span>
+                  <span className="text-slate-500">مدفوعات ومقدمات الطلبيات:</span>
+                  <span className="font-semibold text-accent-600">+{formatCurrency(monthOrdersPaid)}</span>
+                </div>
+                <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-500">إجمالي قيمة الطلبيات الكلية:</span>
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(monthOrdersTotalAmount)}</span>
                 </div>
                 <div className="flex justify-between pb-2 border-b border-slate-100 dark:border-slate-700">
                   <span className="text-slate-500">إجمالي النفقات:</span>
-                  <span className="font-semibold text-error-600">{formatCurrency(monthExpensesTotal)}</span>
+                  <span className="font-semibold text-error-600">-{formatCurrency(monthExpensesTotal)}</span>
                 </div>
               </div>
             </div>
@@ -460,7 +458,6 @@ export default function Accounting() {
         </div>
       )}
 
-      {/* مودال إضافة مصروف */}
       <Modal open={showExpenseModal} onClose={() => setShowExpenseModal(false)} title="إضافة مصروف جديد">
         <div className="space-y-4">
           <div>
@@ -530,7 +527,6 @@ export default function Accounting() {
         </div>
       </Modal>
 
-      {/* مودال تسوية الصندوق */}
       <Modal open={showCashModal} onClose={() => setShowCashModal(false)} title="تسوية وإغلاق الصندوق">
         <div className="space-y-4">
           <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs space-y-1">
