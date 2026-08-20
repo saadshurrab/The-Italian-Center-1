@@ -123,7 +123,6 @@ export default function POS() {
   const discountNum = parseFloat(discount) || 0;
   const total = Math.max(0, subtotal - discountNum);
 
-  // احتساب المبلغ المدفوع والباقي/المتبقي بشكل دقيق
   const actualPaid = paymentMethod === 'cash' || paymentMethod === 'partial'
     ? (amountPaid !== '' ? parseFloat(amountPaid) || 0 : total)
     : total;
@@ -135,7 +134,6 @@ export default function POS() {
     setProcessing(true);
 
     try {
-      // 1. إنشاء سجل المبيعات الرئيسي
       const { data: sale, error: saleErr } = await supabase
         .from('sales')
         .insert({
@@ -153,7 +151,6 @@ export default function POS() {
 
       if (saleErr) throw saleErr;
 
-      // 2. تجهيز عناصر السلة للإدراج
       const saleItems = cart.map((c) => {
         const itemData: any = {
           sale_id: sale.id,
@@ -170,14 +167,12 @@ export default function POS() {
         return itemData;
       });
 
-      // 3. إدراج العناصر في جدول sale_items
       const { error: itemsErr } = await supabase
         .from('sale_items')
         .insert(saleItems);
 
       if (itemsErr) throw itemsErr;
 
-      // 4. تحديث الكميات في المخزون
       for (const item of cart) {
         if (item.inventory_id) {
           const inv = inventory.find((i) => i.id === item.inventory_id);
@@ -190,7 +185,6 @@ export default function POS() {
         }
       }
 
-      // 5. إعداد الإيصال الشامل وتفريغ السلة
       const customer = customers.find((c) => c.id === selectedCustomer);
 
       setReceiptData({
@@ -214,7 +208,6 @@ export default function POS() {
       setAmountPaid('');
       setPaymentMethod('cash');
 
-      // إعادة تحميل المخزون
       const { data: newInv } = await supabase
         .from('inventory')
         .select('*')
@@ -254,9 +247,20 @@ export default function POS() {
 
   return (
     <div>
-      {/* CSS الخاص بطباعة الإيصال كصفحة كاملة رسمية */}
+      {/* تنسيق الطباعة النهائي المعالج بالكامل */}
       <style>{`
+        @page {
+          size: auto;
+          margin: 0mm; /* لإخفاء رأس وذيل المتصفح مثل التاريخ ورابط الموقع */
+        }
         @media print {
+          body {
+            background: #fff !important;
+            color: #000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          /* إخفاء كل العناصر بالصفحة عدا منطقة الفاتورة */
           body * {
             visibility: hidden !important;
           }
@@ -268,12 +272,11 @@ export default function POS() {
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            max-width: 100% !important;
             margin: 0 !important;
-            padding: 25px !important;
-            background: #fff !important;
-            color: #000 !important;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+            padding: 15mm !important;
             box-shadow: none !important;
+            border: none !important;
           }
           .no-print {
             display: none !important;
@@ -449,16 +452,6 @@ export default function POS() {
                   placeholder={total.toString()}
                   className="input text-left"
                 />
-                {actualPaid > total && (
-                  <p className="text-sm text-accent-600 dark:text-accent-400 mt-1">
-                    الباقي للعميل: {formatCurrency(actualPaid - total)}
-                  </p>
-                )}
-                {actualPaid < total && (
-                  <p className="text-sm text-red-500 mt-1">
-                    المتبقي كدين: {formatCurrency(total - actualPaid)}
-                  </p>
-                )}
               </div>
             )}
 
@@ -490,18 +483,18 @@ export default function POS() {
         </div>
       </Modal>
 
-      {/* Receipt Modal & Official Printable Layout */}
+      {/* Modal & Receipts */}
       <Modal open={showReceipt} onClose={() => setShowReceipt(false)} title="إيصال البيع الرسمي" size="lg">
         {receiptData && (
           <div>
-            <div id="receipt-print-area" className="p-8 bg-white text-slate-900 dir-rtl text-right font-sans border border-slate-300 rounded-lg">
+            <div id="receipt-print-area" className="p-6 bg-white text-slate-900 dir-rtl text-right font-sans border border-slate-200 rounded-lg">
               
               {/* Header */}
-              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-6">
+              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-4 mb-4">
                 <div>
-                  <h1 className="font-bold text-3xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
-                  <p className="text-sm text-slate-600 mt-1">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
-                  <p className="text-xs text-slate-500 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
+                  <h1 className="font-bold text-2xl text-slate-900 tracking-tight">المركز الإيطالي للبصريات</h1>
+                  <p className="text-xs text-slate-600 mt-1">لتجهيز وقص جميع أنواع النظارات الطبية والشمسية</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">فاتورة بيع رسمية / إيصال استلام</p>
                 </div>
                 <div className="text-left text-xs text-slate-600 space-y-1">
                   <p><span className="font-semibold text-slate-800">رقم الفاتورة:</span> #{receiptData.saleId.slice(0, 8).toUpperCase()}</p>
@@ -510,8 +503,8 @@ export default function POS() {
                 </div>
               </div>
 
-              {/* Customer Info Box */}
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-6 flex justify-between items-center text-sm">
+              {/* Customer Info */}
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4 flex justify-between items-center text-xs">
                 <div>
                   <span className="text-slate-500">اسم العميل: </span>
                   <span className="font-bold text-slate-800">{receiptData.customerName}</span>
@@ -522,38 +515,38 @@ export default function POS() {
                 </div>
               </div>
 
-              {/* Items Table */}
-              <table className="w-full text-sm mb-6 border-collapse">
+              {/* Table */}
+              <table className="w-full text-xs mb-4 border-collapse">
                 <thead>
-                  <tr className="bg-slate-100 border-y-2 border-slate-300 text-slate-800">
-                    <th className="text-right py-2.5 px-3">#</th>
-                    <th className="text-right py-2.5 px-3">السلعة / المنتج</th>
-                    <th className="text-center py-2.5 px-3">الكمية</th>
-                    <th className="text-left py-2.5 px-3">سعر الوحدة</th>
-                    <th className="text-left py-2.5 px-3">المجموع</th>
+                  <tr className="bg-slate-100 border-y border-slate-300 text-slate-800">
+                    <th className="text-right py-2 px-2">#</th>
+                    <th className="text-right py-2 px-2">السلعة / المنتج</th>
+                    <th className="text-center py-2 px-2">الكمية</th>
+                    <th className="text-left py-2 px-2">سعر الوحدة</th>
+                    <th className="text-left py-2 px-2">المجموع</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {receiptData.items.map((item: CartItem, i: number) => (
                     <tr key={i}>
-                      <td className="py-3 px-3 text-slate-400 text-xs">{i + 1}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-800">{item.name}</td>
-                      <td className="py-3 px-3 text-center">{item.qty}</td>
-                      <td className="py-3 px-3 text-left font-mono">{formatCurrency(item.price)}</td>
-                      <td className="py-3 px-3 text-left font-bold font-mono text-slate-900">{formatCurrency(item.price * item.qty)}</td>
+                      <td className="py-2 px-2 text-slate-400">{i + 1}</td>
+                      <td className="py-2 px-2 font-semibold text-slate-800">{item.name}</td>
+                      <td className="py-2 px-2 text-center">{item.qty}</td>
+                      <td className="py-2 px-2 text-left font-mono">{formatCurrency(item.price)}</td>
+                      <td className="py-2 px-2 text-left font-bold font-mono text-slate-900">{formatCurrency(item.price * item.qty)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
-              {/* Totals & Summary */}
-              <div className="flex justify-between items-start pt-4 border-t-2 border-slate-300">
-                <div className="text-xs text-slate-500 space-y-1">
+              {/* Totals */}
+              <div className="flex justify-between items-start pt-3 border-t-2 border-slate-300">
+                <div className="text-[11px] text-slate-500 space-y-1">
                   <p>• البضاعة المبيعة ترجع أو تستبدل خلال 3 أيام بشرط حالتها الأصلية.</p>
-                  <p>• يرجى الاحتفاظ بهذا الإيصال للمراجعة أو الصيانة.</p>
+                  <p>• يرجى الاحتفاظ بهذا الإيصال للمراجعة.</p>
                 </div>
 
-                <div className="w-64 space-y-2 text-sm">
+                <div className="w-56 space-y-1.5 text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>المجموع الفرعي:</span>
                     <span className="font-mono">{formatCurrency(receiptData.subtotal)}</span>
@@ -564,11 +557,11 @@ export default function POS() {
                       <span className="font-mono">-{formatCurrency(receiptData.discount)}</span>
                     </div>
                   )}
-                  <div className="flex justify-between font-bold text-base text-slate-900 border-t border-b py-2 border-slate-300">
+                  <div className="flex justify-between font-bold text-sm text-slate-900 border-t border-b py-1.5 border-slate-300">
                     <span>الإجمالي النهائي:</span>
                     <span className="font-mono">{formatCurrency(receiptData.total)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-700 pt-1">
+                  <div className="flex justify-between text-slate-700 pt-0.5">
                     <span>المبلغ المدفوع:</span>
                     <span className="font-mono font-semibold">{formatCurrency(receiptData.amountPaid)}</span>
                   </div>
@@ -588,14 +581,13 @@ export default function POS() {
               </div>
 
               {/* Footer */}
-              <div className="text-center text-xs text-slate-500 mt-10 pt-4 border-t border-slate-200">
-                <p className="font-semibold text-slate-700 mb-1">شكراً لتسوقكم من المركز الإيطالي للبصريات</p>
+              <div className="text-center text-[11px] text-slate-500 mt-6 pt-3 border-t border-slate-200">
+                <p className="font-semibold text-slate-700 mb-0.5">شكراً لتسوقكم من المركز الإيطالي للبصريات</p>
                 <p>نتمنى لكم دوام الصحة والعافية</p>
               </div>
 
             </div>
 
-            {/* Print Action Buttons */}
             <div className="no-print mt-6 flex gap-3">
               <button onClick={handlePrint} className="btn-primary flex-1 py-3 text-base">
                 <Printer className="w-5 h-5" /> طباعة الإيصال الرسمي
