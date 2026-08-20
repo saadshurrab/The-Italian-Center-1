@@ -15,17 +15,26 @@ import { PageHeader, Modal, Badge, LoadingSpinner, EmptyState, StatCard } from '
 
 const EXPENSE_CATS = Object.keys(EXPENSE_LABELS) as ExpenseCategory[];
 
+interface PaymentRecord {
+  id: string;
+  amount: number;
+  payment_method: 'cash' | 'card' | 'transfer' | 'partial' | 'installment';
+  created_at: string;
+  source_type?: 'order' | 'invoice' | 'debt';
+}
+
 export default function Accounting() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'overview' | 'cash' | 'expenses'>('overview');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [cashEntries, setCashEntries] = useState<CashRegister[]>([]);
-  const [sales, setSales] = useState<{ total: number; payment_method: string; created_at: string }[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState<string>('all');
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
+  
   const [expenseForm, setExpenseForm] = useState({
     expense_date: new Date().toISOString().slice(0, 10),
     category: 'rent' as ExpenseCategory,
@@ -33,6 +42,7 @@ export default function Accounting() {
     amount: '',
     payment_method: 'cash' as 'cash' | 'card' | 'transfer',
   });
+  
   const [cashForm, setCashForm] = useState({
     register_date: new Date().toISOString().slice(0, 10),
     opening_balance: '',
@@ -43,33 +53,48 @@ export default function Accounting() {
     employee_id: '',
   });
 
+  const fetchData = async () => {
+    const [expRes, cashRes, payRes, empRes] = await Promise.all([
+      supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
+      supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
+      // جلب جميع التدفقات المالية المقبوضة من جدول المدفوعات الموحد
+      supabase.from('payments').select('id, amount, payment_method, created_at, source_type').order('created_at', { ascending: false }),
+      supabase.from('employees').select('*').order('name'),
+    ]);
+
+    setExpenses(expRes.data || []);
+    setCashEntries(cashRes.data || []);
+    setPayments(payRes.data || []);
+    setEmployees(empRes.data || []);
+    setLoading(false);
+  };
+
   useEffect(() => {
-    (async () => {
-      const [expRes, cashRes, salesRes, empRes] = await Promise.all([
-        supabase.from('expenses').select('*').order('expense_date', { ascending: false }),
-        supabase.from('cash_register').select('*').order('register_date', { ascending: false }),
-        supabase.from('sales').select('total, payment_method, created_at').order('created_at', { ascending: false }),
-        supabase.from('employees').select('*').order('name'),
-      ]);
-      setExpenses(expRes.data || []);
-      setCashEntries(cashRes.data || []);
-      setSales(salesRes.data || []);
-      setEmployees(empRes.data || []);
-      setLoading(false);
-    })();
+    fetchData();
   }, []);
 
+  // تحديد بداية اليوم والشهر بدقة بحسب التواريخ الحالية
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-  const monthSales = sales.filter((s) => s.created_at >= monthStart).reduce((s, r) => s + Number(r.total), 0);
-  const todaySales = sales.filter((s) => s.created_at >= todayStart).reduce((s, r) => s + Number(r.total), 0);
-  const monthExpenses = expenses.filter((e) => e.expense_date >= monthStart.slice(0, 10)).reduce((s, e) => s + Number(e.amount), 0);
+  // حساب المقبوضات الفعلية (الطلبيات + الفواتير + تسديد الديون)
+  const monthSales = payments
+    .filter((p) => p.created_at >= monthStart)
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const todaySales = payments
+    .filter((p) => p.created_at >= todayStart)
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const monthExpenses = expenses
+    .filter((e) => e.expense_date >= monthStart.slice(0, 10))
+    .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
   const profit = monthSales - monthExpenses;
 
   const filteredExpenses = expenses.filter((e) => {
-    const matchSearch = (e.description || '').includes(search) || EXPENSE_LABELS[e.category].includes(search);
+    const matchSearch = (e.description || '').includes(search) || (EXPENSE_LABELS[e.category] || '').includes(search);
     const matchCat = filterCat === 'all' || e.category === filterCat;
     return matchSearch && matchCat;
   });
@@ -84,8 +109,8 @@ export default function Accounting() {
       payment_method: expenseForm.payment_method,
     });
     if (error) { alert('خطأ: ' + error.message); return; }
-    const { data } = await supabase.from('expenses').select('*').order('expense_date', { ascending: false });
-    setExpenses(data || []);
+    
+    await fetchData();
     setShowExpenseModal(false);
     setExpenseForm({ ...expenseForm, description: '', amount: '' });
   }
@@ -101,8 +126,8 @@ export default function Accounting() {
       employee_id: cashForm.employee_id || null,
     });
     if (error) { alert('خطأ: ' + error.message); return; }
-    const { data } = await supabase.from('cash_register').select('*').order('register_date', { ascending: false });
-    setCashEntries(data || []);
+    
+    await fetchData();
     setShowCashModal(false);
     setCashForm({ ...cashForm, opening_balance: '', cash_in: '', cash_out: '', closing_balance: '', notes: '', employee_id: '' });
   }
@@ -142,8 +167,8 @@ export default function Accounting() {
       {tab === 'overview' && (
         <div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatCard label="مبيعات اليوم" value={formatCurrency(todaySales)} icon={<DollarSign className="w-6 h-6 text-white" />} color="accent" />
-            <StatCard label="مبيعات الشهر" value={formatCurrency(monthSales)} icon={<TrendingUp className="w-6 h-6 text-white" />} color="brand" />
+            <StatCard label="مبيعات اليوم (المقبوضات)" value={formatCurrency(todaySales)} icon={<DollarSign className="w-6 h-6 text-white" />} color="accent" />
+            <StatCard label="مبيعات الشهر (المقبوضات)" value={formatCurrency(monthSales)} icon={<TrendingUp className="w-6 h-6 text-white" />} color="brand" />
             <StatCard label="مصروفات الشهر" value={formatCurrency(monthExpenses)} icon={<TrendingDown className="w-6 h-6 text-white" />} color="error" />
             <StatCard label="صافي الربح" value={formatCurrency(profit)} icon={<Wallet className="w-6 h-6 text-white" />} color={profit >= 0 ? 'accent' : 'error'} />
           </div>
@@ -152,11 +177,13 @@ export default function Accounting() {
           <div className="card p-6">
             <h3 className="font-display font-bold text-lg text-slate-800 dark:text-white mb-4">المبيعات حسب طريقة الدفع (الشهر الحالي)</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {(['cash', 'card', 'partial', 'installment'] as const).map((m) => {
-                const total = sales.filter((s) => s.payment_method === m && s.created_at >= monthStart).reduce((sum, s) => sum + Number(s.total), 0);
+              {(['cash', 'card', 'transfer', 'installment'] as const).map((m) => {
+                const total = payments
+                  .filter((p) => p.payment_method === m && p.created_at >= monthStart)
+                  .reduce((sum, p) => sum + Number(p.amount || 0), 0);
                 return (
                   <div key={m} className="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/40">
-                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{PAYMENT_LABELS[m]}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{PAYMENT_LABELS[m] || m}</p>
                     <p className="text-lg font-bold text-slate-800 dark:text-white">{formatCurrency(total)}</p>
                   </div>
                 );
