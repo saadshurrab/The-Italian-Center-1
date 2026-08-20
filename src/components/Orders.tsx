@@ -193,9 +193,6 @@ export default function Orders() {
     setForm((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
   }
 
-  // =========================================================
-  // دالة الحفظ المعدلة: ربط الشؤون المالية والديون وتحديد طريقة الدفع
-  // =========================================================
   async function save() {
     if (!form.customer_id) {
       alert('الرجاء اختيار العميل');
@@ -212,7 +209,6 @@ export default function Orders() {
       status: editingOrder?.status || 'pending',
       total_amount: total,
       amount_paid: paid,
-      payment_method: form.payment_method, // تم إضافة حقل طريقة الدفع ليتطابق مع المحاسبة
       notes: form.notes ? form.notes : null,
     };
 
@@ -238,7 +234,6 @@ export default function Orders() {
       orderId = data.id;
     }
 
-    // 1. إضافة عناصر الطلبية
     if (form.items.length > 0 && orderId) {
       const itemsPayload = form.items.map((i) => ({
         order_id: orderId,
@@ -253,7 +248,6 @@ export default function Orders() {
       await supabase.from('order_items').insert(itemsPayload);
     }
 
-    // 2. ربط المدفوعات المالية والديون
     try {
       if (paid > 0 && orderId) {
         await supabase.from('payments').insert({
@@ -754,7 +748,7 @@ export default function Orders() {
                   <span className="text-slate-500 dark:text-slate-400">حالة التصنيع:</span> <strong className="text-slate-900 dark:text-slate-100">{ORDER_STATUS_LABELS[viewOrder.status]}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 dark:text-slate-400">طريقة الدفع:</span> <strong className="text-slate-900 dark:text-slate-100">{PAYMENT_LABELS[(viewOrder as any).payment_method] || (viewOrder as any).payment_method || 'نقدي'}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">طريقة الدفع:</span> <strong className="text-slate-900 dark:text-slate-100">{PAYMENT_LABELS[(viewOrder as any)?.payment_method] || 'نقدي'}</strong>
                 </div>
               </div>
 
