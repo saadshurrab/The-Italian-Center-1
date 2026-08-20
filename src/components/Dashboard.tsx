@@ -13,6 +13,32 @@ import {
 import { supabase, formatCurrency, ORDER_STATUS_LABELS } from '@/lib/supabase';
 import { StatCard, LoadingSpinner } from '@/components/ui';
 
+interface SaleRecord {
+  id?: string;
+  total?: number;
+  payment_method?: string;
+  created_at: string;
+}
+
+interface OrderRecord {
+  id: string;
+  status: string;
+  total_amount?: number;
+  total?: number;
+  amount_paid?: number;
+  paid_amount?: number;
+  paid?: number;
+  created_at: string;
+  customers?: { name: string } | { name: string }[];
+}
+
+interface ExpenseRecord {
+  id: string;
+  amount: number;
+  expense_date: string;
+  created_at?: string;
+}
+
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -35,33 +61,17 @@ export default function Dashboard() {
     { id: string; status: string; total_amount: number; customer_name: string }[]
   >([]);
 
-  // استخراج المدفوعات وقيم المبيعات بأمان من أي مسمى حقل في قاعدة البيانات
-  const getOrderPaidAmount = (o: any) => {
-    if (!o) return 0;
-    const val =
-      o.paid_amount ??
-      o.amount_paid ??
-      o.paid ??
-      o.deposit ??
-      o.down_payment ??
-      o.advance_payment ??
-      0;
-    return Number(val) || 0;
+  // استخراج المدفوع فعلياً من الطلبية مثل كود المحاسبة تماماً
+  const getOrderPaidAmount = (o: OrderRecord) => {
+    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
   };
 
-  const getOrderTotalAmount = (o: any) => {
-    if (!o) return 0;
-    const val = o.total_amount ?? o.total ?? o.price ?? 0;
-    return Number(val) || 0;
+  // استخراج إجمالي قيمة الطلبية
+  const getOrderTotalAmount = (o: OrderRecord) => {
+    return Number(o.total_amount ?? o.total ?? 0);
   };
 
-  const getSaleTotalAmount = (s: any) => {
-    if (!s) return 0;
-    const val = s.total ?? s.total_amount ?? s.amount ?? 0;
-    return Number(val) || 0;
-  };
-
-  // دوال مطابقة التواريخ بنفس آلية المحاسبة والصندوق
+  // دوال مطابقة التواريخ بنفس آلية صفحة المحاسبة والصندوق
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -100,7 +110,6 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        // جلب البيانات من كافة الجداول المالية والتنفيذية
         const [
           salesRes,
           ordersRes,
@@ -110,7 +119,7 @@ export default function Dashboard() {
           customersRes,
           itemsRes,
         ] = await Promise.all([
-          supabase.from('sales').select('*'),
+          supabase.from('sales').select('id, total, created_at'),
           supabase.from('orders').select('*, customers(name)'),
           supabase.from('expenses').select('*'),
           supabase.from('inventory').select('*'),
@@ -123,20 +132,20 @@ export default function Dashboard() {
             .limit(5),
         ]);
 
-        const sales = salesRes.data || [];
-        const orders = ordersRes.data || [];
-        const expenses = expensesRes.data || [];
+        const sales: SaleRecord[] = salesRes.data || [];
+        const orders: OrderRecord[] = ordersRes.data || [];
+        const expenses: ExpenseRecord[] = expensesRes.data || [];
 
         // 1. مبيعات المعرض المباشرة
         const monthSalesTotal = sales
           .filter((s) => isThisMonth(s.created_at))
-          .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
+          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
         const todaySalesTotal = sales
           .filter((s) => isToday(s.created_at))
-          .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
+          .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-        // 2. مقبوضات ومقدمات الطلبيات (تُحسب من الصندوق والمحاسبة)
+        // 2. مقبوضات ومقدمات الطلبيات (طريقة المحاسبة)
         const monthOrdersPaid = orders
           .filter((o) => isThisMonth(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
@@ -145,11 +154,11 @@ export default function Dashboard() {
           .filter((o) => isToday(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // إجمالي المقبوضات الشاملة (مبيعات + دفعة أُولى/مقبوضات طلبات)
-        const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
+        // 3. الإيرادات الإجمالية والشاملة
         const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
+        const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
 
-        // 3. المصروفات
+        // 4. المصروفات
         const monthExpensesTotal = expenses
           .filter((e) => isThisMonth(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
@@ -158,7 +167,7 @@ export default function Dashboard() {
           .filter((e) => isToday(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
-        // 4. الفحوصات والمخزون والطلبيات النشطة
+        // 5. باقي المؤشرات
         const todayExamsCount = (examsRes.data || []).filter((e) =>
           isToday(e.exam_date || e.created_at)
         ).length;
@@ -182,7 +191,7 @@ export default function Dashboard() {
           totalCustomers: customersRes.count || 0,
         });
 
-        // 5. رسم بياني لإيرادات آخر 7 أيام (مبيعات + مقبوضات طلبات)
+        // 6. رسم بياني للإيرادات لآخر 7 أيام
         const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
           const targetDate = new Date();
@@ -190,7 +199,7 @@ export default function Dashboard() {
 
           const daySales = sales
             .filter((s) => isSameDay(s.created_at, targetDate))
-            .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
+            .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
           const dayOrders = orders
             .filter((o) => isSameDay(o.created_at, targetDate))
@@ -203,7 +212,7 @@ export default function Dashboard() {
         }
         setRevenueData(daysData);
 
-        // 6. القوائم الجانبية والتنبيهات
+        // 7. القوائم الجانبية
         setTopItems(
           (itemsRes.data || []).map((i) => ({
             name: i.item_name,
@@ -244,7 +253,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* بطاقات المؤشرات المالية - متطابقة مع صفحة المحاسبة */}
+      {/* بطاقات المؤشرات المالية - مطابقة 100% مع المحاسبة */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="إيرادات اليوم الشاملة"
