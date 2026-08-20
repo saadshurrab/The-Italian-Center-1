@@ -38,7 +38,14 @@ export default function Dashboard() {
   // استخراج المدفوعات وقيم المبيعات بأمان من أي مسمى حقل في قاعدة البيانات
   const getOrderPaidAmount = (o: any) => {
     if (!o) return 0;
-    const val = o.amount_paid ?? o.paid_amount ?? o.paid ?? o.deposit ?? o.down_payment ?? o.advance_payment ?? 0;
+    const val =
+      o.paid_amount ??
+      o.amount_paid ??
+      o.paid ??
+      o.deposit ??
+      o.down_payment ??
+      o.advance_payment ??
+      0;
     return Number(val) || 0;
   };
 
@@ -93,7 +100,7 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        // جلب عام وشامل لمنع أخطاء الأسماء المطابقة لجداول المحاسبة
+        // جلب البيانات من كافة الجداول المالية والتنفيذية
         const [
           salesRes,
           ordersRes,
@@ -129,7 +136,7 @@ export default function Dashboard() {
           .filter((s) => isToday(s.created_at))
           .reduce((sum, s) => sum + getSaleTotalAmount(s), 0);
 
-        // 2. مقبوضات ومقدمات الطلبيات
+        // 2. مقبوضات ومقدمات الطلبيات (تُحسب من الصندوق والمحاسبة)
         const monthOrdersPaid = orders
           .filter((o) => isThisMonth(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
@@ -138,11 +145,11 @@ export default function Dashboard() {
           .filter((o) => isToday(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // إجمالي المقبوضات (مبيعات + مقبوضات طلبات)
+        // إجمالي المقبوضات الشاملة (مبيعات + دفعة أُولى/مقبوضات طلبات)
         const todayTotalRevenue = todaySalesTotal + todayOrdersPaid;
         const monthTotalRevenue = monthSalesTotal + monthOrdersPaid;
 
-        // 3. المصروفات من جدول expenses
+        // 3. المصروفات
         const monthExpensesTotal = expenses
           .filter((e) => isThisMonth(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
@@ -175,7 +182,7 @@ export default function Dashboard() {
           totalCustomers: customersRes.count || 0,
         });
 
-        // 5. رسم بياني لإيرادات آخر 7 أيام
+        // 5. رسم بياني لإيرادات آخر 7 أيام (مبيعات + مقبوضات طلبات)
         const daysData: { day: string; amount: number }[] = [];
         for (let i = 6; i >= 0; i--) {
           const targetDate = new Date();
@@ -237,16 +244,16 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* بطاقات المؤشرات المالية - متطابقة 100% مع المحاسبة */}
+      {/* بطاقات المؤشرات المالية - متطابقة مع صفحة المحاسبة */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          label="إيرادات اليوم"
+          label="إيرادات اليوم الشاملة"
           value={formatCurrency(stats.todaySales)}
           icon={<DollarSign className="w-6 h-6 text-white" />}
           color="accent"
         />
         <StatCard
-          label="إيرادات الشهر"
+          label="إجمالي المقبوضات الشهرية"
           value={formatCurrency(stats.monthSales)}
           icon={<TrendingUp className="w-6 h-6 text-white" />}
           color="brand"
@@ -330,7 +337,9 @@ export default function Dashboard() {
                   </span>
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{item.name}</span>
+                      <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
+                        {item.name}
+                      </span>
                       <span className="text-xs text-slate-400">{item.qty} قطعة</span>
                     </div>
                     <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -347,7 +356,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* جداول تنبيهات المخزون والطلبيات النشطة */}
+      {/* تنبيهات المخزون والطلبيات النشطة */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -365,7 +374,9 @@ export default function Dashboard() {
                   key={item.id}
                   className="flex items-center justify-between p-3 rounded-lg bg-error-50 dark:bg-error-900/20 border border-error-100 dark:border-error-900/40"
                 >
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{item.name}</span>
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {item.name}
+                  </span>
                   <span className="text-sm font-bold text-error-600 dark:text-error-400">
                     {item.quantity} / {item.reorder_level}
                   </span>
@@ -396,7 +407,8 @@ export default function Dashboard() {
                       {order.customer_name}
                     </span>
                     <span className="text-xs text-slate-400 block">
-                      {ORDER_STATUS_LABELS[order.status as keyof typeof ORDER_STATUS_LABELS] || order.status}
+                      {ORDER_STATUS_LABELS[order.status as keyof typeof ORDER_STATUS_LABELS] ||
+                        order.status}
                     </span>
                   </div>
                   <span className="text-sm font-bold text-slate-600 dark:text-slate-300">
