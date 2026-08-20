@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Eye, Plus, Search, Printer, History, Trash2, Edit } from 'lucide-react';
 import {
   supabase,
-  formatCurrency,
   formatDate,
   type Customer,
   type Examination,
@@ -142,6 +141,32 @@ export default function Examinations() {
 
   return (
     <div>
+      {/* أنماط الطباعة المخصصة */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #print-prescription, #print-prescription * {
+            visibility: visible !important;
+          }
+          #print-prescription {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            padding: 40px !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            z-index: 999999 !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       <PageHeader
         title="الفحوصات والأرشيف الطبي"
         subtitle="سجل فحوصات النظر والوصفات الطبية"
@@ -333,54 +358,83 @@ export default function Examinations() {
       </Modal>
 
       {/* View exam / prescription */}
-      <Modal open={!!selectedExam} onClose={() => setSelectedExam(null)} title="بطاقة الوصفة البصرية" size="md">
+      <Modal open={!!selectedExam} onClose={() => setSelectedExam(null)} title="بطاقة الوصفة البصرية" size="lg">
         {selectedExam && (
           <div>
-            <div className="print-area">
-              <div className="text-center mb-6 pb-4 border-b border-slate-200 dark:border-slate-700">
-                <h2 className="font-display font-bold text-xl text-slate-800 dark:text-white">المركز الإيطالي للبصريات</h2>
-                <p className="text-sm text-slate-400 mt-1">وصفة طبية</p>
-                <p className="text-sm text-slate-400">{formatDate(selectedExam.exam_date)}</p>
-                {selectedExam.doctor_name && <p className="text-sm text-slate-400">الطبيب: {selectedExam.doctor_name}</p>}
+            <div id="print-prescription" className="p-4 bg-white text-slate-900 rounded-lg">
+              {/* رأس الوصفة */}
+              <div className="text-center mb-6 pb-4 border-b-2 border-slate-800">
+                <h2 className="font-bold text-2xl text-slate-900">شركة الرؤية النقية للبصريات</h2>
+                <p className="text-base text-slate-600 mt-1 font-medium">وصفة طبية / Prescription</p>
+                <p className="text-sm text-slate-500 mt-1">تاريخ الفحص: {formatDate(selectedExam.exam_date)}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="card p-4 border-2 border-brand-200 dark:border-brand-800">
-                  <h4 className="font-bold text-brand-700 dark:text-brand-300 mb-3">العين اليمنى (OD)</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-slate-400">SPH:</span><span className="font-bold">{selectedExam.od_sph ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">CYL:</span><span className="font-bold">{selectedExam.od_cyl ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">AXIS:</span><span className="font-bold">{selectedExam.od_axis ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">ADD:</span><span className="font-bold">{selectedExam.od_add ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">PD:</span><span className="font-bold">{selectedExam.od_pd ?? '—'}</span></div>
-                  </div>
+              {/* بيانات المريض والطبيب */}
+              <div className="flex justify-between items-center mb-6 pb-3 border-b border-slate-200 text-sm font-semibold">
+                <div>
+                  <span className="text-slate-500">اسم العميل: </span>
+                  <span className="text-slate-900">{selectedExam.customers?.name || customers.find(c => c.id === selectedExam.customer_id)?.name || '—'}</span>
                 </div>
-                <div className="card p-4 border-2 border-accent-200 dark:border-accent-800">
-                  <h4 className="font-bold text-accent-700 dark:text-accent-300 mb-3">العين اليسرى (OS)</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-slate-400">SPH:</span><span className="font-bold">{selectedExam.os_sph ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">CYL:</span><span className="font-bold">{selectedExam.os_cyl ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">AXIS:</span><span className="font-bold">{selectedExam.os_axis ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">ADD:</span><span className="font-bold">{selectedExam.os_add ?? '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-400">PD:</span><span className="font-bold">{selectedExam.os_pd ?? '—'}</span></div>
+                {selectedExam.doctor_name && (
+                  <div>
+                    <span className="text-slate-500">الطبيب الفاحص: </span>
+                    <span className="text-slate-900">{selectedExam.doctor_name}</span>
                   </div>
-                </div>
+                )}
               </div>
 
-              {selectedExam.visual_field && (
-                <div className="mb-4">
-                  <span className="text-sm text-slate-400">المجال البصري: </span>
-                  <span className="text-sm text-slate-700 dark:text-slate-200">{selectedExam.visual_field}</span>
+              {/* جدول القياسات المصمم بشكل ممتاز للطباعة */}
+              <table className="w-full text-center border-collapse my-4 text-sm dir-rtl">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-800">
+                    <th className="border border-slate-400 p-2 font-bold">العين (Eye)</th>
+                    <th className="border border-slate-400 p-2 font-bold">SPH</th>
+                    <th className="border border-slate-400 p-2 font-bold">CYL</th>
+                    <th className="border border-slate-400 p-2 font-bold">AXIS</th>
+                    <th className="border border-slate-400 p-2 font-bold">ADD</th>
+                    <th className="border border-slate-400 p-2 font-bold">PD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="border border-slate-400 p-2 font-bold bg-slate-50">اليمنى (OD)</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.od_sph ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.od_cyl ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.od_axis ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.od_add ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.od_pd ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <td className="border border-slate-400 p-2 font-bold bg-slate-50">اليسرى (OS)</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.os_sph ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.os_cyl ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.os_axis ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.os_add ?? '—'}</td>
+                    <td className="border border-slate-400 p-2">{selectedExam.os_pd ?? '—'}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* ملاحظات إضافية */}
+              {(selectedExam.visual_field || selectedExam.notes) && (
+                <div className="mt-4 space-y-2 text-xs border-t border-slate-200 pt-3">
+                  {selectedExam.visual_field && (
+                    <p><span className="font-bold">المجال البصري:</span> {selectedExam.visual_field}</p>
+                  )}
+                  {selectedExam.notes && (
+                    <p><span className="font-bold">ملاحظات:</span> {selectedExam.notes}</p>
+                  )}
                 </div>
               )}
-              {selectedExam.notes && (
-                <div className="mb-4">
-                  <span className="text-sm text-slate-400">ملاحظات: </span>
-                  <span className="text-sm text-slate-700 dark:text-slate-200">{selectedExam.notes}</span>
-                </div>
-              )}
+
+              {/* التوقيع */}
+              <div className="mt-10 flex justify-between items-center text-xs pt-4 border-t border-slate-300">
+                <div>توقيع الطبيب / الفاحص: __________________</div>
+                <div>الختم: __________________</div>
+              </div>
             </div>
-            <div className="no-print flex gap-2">
+
+            <div className="no-print flex gap-2 mt-4">
               <button onClick={() => window.print()} className="btn-primary flex-1">
                 <Printer className="w-4 h-4" /> طباعة الوصفة
               </button>
