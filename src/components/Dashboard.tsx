@@ -25,11 +25,14 @@ interface OrderRecord {
   status: string;
   total_amount?: number;
   total?: number;
-  amount_paid?: number;
-  paid_amount?: number;
-  paid?: number;
   created_at: string;
   customers?: { name: string } | { name: string }[];
+}
+
+interface OrderPaymentRecord {
+  id: string;
+  amount: number;
+  created_at: string;
 }
 
 interface ExpenseRecord {
@@ -107,6 +110,7 @@ export default function Dashboard() {
         const [
           salesRes,
           ordersRes,
+          paymentsRes,
           expensesRes,
           inventoryRes,
           examsRes,
@@ -115,6 +119,7 @@ export default function Dashboard() {
         ] = await Promise.all([
           supabase.from('sales').select('id, total, created_at'),
           supabase.from('orders').select('*, customers(name)'),
+          supabase.from('order_payments').select('id, amount, created_at'),
           supabase.from('expenses').select('*'),
           supabase.from('inventory').select('*'),
           supabase.from('examinations').select('*'),
@@ -128,6 +133,7 @@ export default function Dashboard() {
 
         const sales: SaleRecord[] = salesRes.data || [];
         const orders: OrderRecord[] = ordersRes.data || [];
+        const orderPayments: OrderPaymentRecord[] = paymentsRes.data || [];
         const expenses: ExpenseRecord[] = expensesRes.data || [];
 
         // 1. مبيعات المعرض المباشرة
@@ -139,16 +145,16 @@ export default function Dashboard() {
           .filter((s) => isThisMonth(s.created_at))
           .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-        // 2. مدفوعات ومقدمات الطلبيات المقبوضة
-        const todayPaymentsTotal = orders
-          .filter((o) => isToday(o.created_at))
-          .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
+        // 2. مدفوعات ومقدمات الطلبيات المقبوضة من جدول order_payments مباشرة
+        const todayPaymentsTotal = orderPayments
+          .filter((p) => isToday(p.created_at))
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-        const monthPaymentsTotal = orders
-          .filter((o) => isThisMonth(o.created_at))
-          .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
+        const monthPaymentsTotal = orderPayments
+          .filter((p) => isThisMonth(p.created_at))
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-        // الإيرادات الإجمالية المقبوضة = مبيعات المعرض + مقدمات/مدفوعات الطلبيات
+        // الإيرادات الإجمالية المقبوضة = مبيعات المعرض + مدفوعات الطلبيات الفعلية
         const todayRevenue = todaySalesDirect + todayPaymentsTotal;
         const monthRevenue = monthSalesDirect + monthPaymentsTotal;
 
@@ -195,9 +201,9 @@ export default function Dashboard() {
             .filter((s) => isSameDay(s.created_at, targetDate))
             .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-          const dayPayments = orders
-            .filter((o) => isSameDay(o.created_at, targetDate))
-            .reduce((sum, o) => sum + Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0), 0);
+          const dayPayments = orderPayments
+            .filter((p) => isSameDay(p.created_at, targetDate))
+            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
           daysData.push({
             day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
