@@ -96,7 +96,6 @@ export default function Dashboard() {
     );
   };
 
-  // إجمالي الدفعة الأولى أو المبلغ المقبوض من الطلبية
   const getOrderPaidAmount = (o: OrderRecord) => {
     return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
   };
@@ -109,7 +108,6 @@ export default function Dashboard() {
     (async () => {
       setLoading(true);
       try {
-        // الاستعلام عن الجداول الفعلية فقط
         const [
           salesRes,
           ordersRes,
@@ -145,7 +143,7 @@ export default function Dashboard() {
           .filter((s) => isThisMonth(s.created_at))
           .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-        // 2. المقبوضات من الطلبيات (الاعتماد المباشر على جدول orders)
+        // 2. مقبوضات ومقدمات الطلبيات (تشمل كلاً من الطلبيات النشطة والمدفوعات)
         const todayPaymentsTotal = orders
           .filter((o) => isToday(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
@@ -154,7 +152,7 @@ export default function Dashboard() {
           .filter((o) => isThisMonth(o.created_at))
           .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // الإيرادات النهائية المطابقة للصندوق والمحاسبة
+        // الإيرادات الإجمالية = مبيعات المعرض + مقدمات ومقبوضات الطلبيات
         const todayRevenue = todaySalesDirect + todayPaymentsTotal;
         const monthRevenue = monthSalesDirect + monthPaymentsTotal;
 
