@@ -13,7 +13,6 @@ import {
   Printer,
   Glasses,
   DollarSign,
-  AlertCircle,
   FileText,
 } from 'lucide-react';
 import {
@@ -206,15 +205,15 @@ export default function Orders() {
     const paid = Number(form.amount_paid) || 0;
     const balance = Math.max(0, total - paid);
 
-    const orderPayload = {
+    // تجهيز كائن البيانات المرسلة مع مراعاة القيود وإزالة العمود غير الموجود لمنع خطأ 400
+    const orderPayload: Record<string, any> = {
       customer_id: form.customer_id,
-      examination_id: form.examination_id ? form.examination_id : null,
+      examination_id: form.examination_id && form.examination_id.trim() !== '' ? form.examination_id : null,
       status: editingOrder?.status || 'pending',
       total_amount: total,
       amount_paid: paid,
       balance: balance,
       notes: form.notes ? form.notes : null,
-      lens_details: form.lens_details, // تخزين المواصفات الفنية للعدسات
     };
 
     let orderId = editingOrder?.id;
@@ -226,6 +225,7 @@ export default function Orders() {
         .eq('id', editingOrder.id);
 
       if (error) {
+        console.error('Supabase error details:', error);
         alert('خطأ أثناء التحديث: ' + error.message);
         return;
       }
@@ -233,6 +233,7 @@ export default function Orders() {
     } else {
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
       if (error) {
+        console.error('Supabase error details:', error);
         alert('خطأ أثناء الإنشاء: ' + error.message);
         return;
       }
