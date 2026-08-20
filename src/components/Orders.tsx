@@ -78,7 +78,7 @@ export default function Orders() {
   const [showModal, setShowModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewOrder, setViewOrder] = useState<
-    (Order & { customers?: { name: string; phone?: string }; order_items?: any[]; examination?: Examination | null }) | null
+    (Order & { customers?: { name: string; phone?: string }; order_items?: any[]; examination?: any }) | null
   >(null);
 
   const [form, setForm] = useState({ ...emptyForm });
@@ -271,20 +271,33 @@ export default function Orders() {
     setOrders((prev) => prev.filter((o) => o.id !== id));
   }
 
-  // دالة عرض تفاصيل الطلب مع جلب الفحص التلقائي للعميل إن لم يربط صراحةً
+  // جلب الفحص بشكل مضمون يدعم أشكال مسميات العقول المتعددة
   async function viewOrderDetails(order: Order & { customers?: { name: string; phone?: string } }) {
-    let examData = null;
+    let examData: any = null;
 
     if (order.examination_id) {
       const { data } = await supabase.from('examinations').select('*').eq('id', order.examination_id).maybeSingle();
       examData = data;
-    } else if (order.customer_id) {
-      // البحث عن أحدث فحص مسجل للعميل من قائمة الفحوصات
+    }
+
+    if (!examData && order.customer_id) {
       const { data } = await supabase
         .from('examinations')
         .select('*')
         .eq('customer_id', order.customer_id)
-        .order('exam_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      examData = data;
+    }
+
+    // محاولة بحث إضافية بالهاتف أو الاسم إذا كان جدول الفحوصات غير مرتبطة بـ customer_id بشكل مباشر
+    if (!examData && order.customers?.name) {
+      const { data } = await supabase
+        .from('examinations')
+        .select('*')
+        .ilike('patient_name', `%${order.customers.name}%`)
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       examData = data;
@@ -306,6 +319,17 @@ export default function Orders() {
   if (loading) return <LoadingSpinner />;
 
   const customerExams = form.customer_id ? exams.filter((e) => e.customer_id === form.customer_id) : [];
+
+  // Helper لجلب القياس مع دعم جميع الاحتمالات في أسماء الحقول
+  const getVal = (obj: any, keys: string[]) => {
+    if (!obj) return null;
+    for (const k of keys) {
+      if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') {
+        return obj[k];
+      }
+    }
+    return null;
+  };
 
   return (
     <div>
@@ -377,7 +401,6 @@ export default function Orders() {
                     <Badge text={ORDER_STATUS_LABELS[order.status]} color={STATUS_COLORS[order.status]} />
                   </div>
 
-                  {/* Financial Quick View */}
                   <div className="flex items-center justify-between mb-3 text-sm bg-slate-50 dark:bg-slate-800 p-2.5 rounded-lg">
                     <span className="text-slate-500 dark:text-slate-400">
                       الإجمالي:{' '}
@@ -403,7 +426,6 @@ export default function Orders() {
                     </span>
                   </div>
 
-                  {/* Status Life-Cycle Flow */}
                   <div className="mb-3">
                     <p className="text-[11px] text-slate-400 mb-1 font-medium">مرحلة الطلب والتصنيع:</p>
                     <div className="flex items-center gap-1">
@@ -425,7 +447,6 @@ export default function Orders() {
                     </div>
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center gap-1 border-t border-slate-100 dark:border-slate-700 pt-3">
                     <button onClick={() => viewOrderDetails(order)} className="btn-ghost flex-1 text-xs flex items-center justify-center gap-1">
                       <Eye className="w-4 h-4 text-brand-600" /> عرض وتجهيز الإيصال
@@ -444,7 +465,7 @@ export default function Orders() {
         )}
       </div>
 
-      {/* New/Edit Modal */}
+      {/* Modal - New/Edit */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editingOrder ? 'تعديل الطلبية' : 'إنشاء طلبية نظارة جديد'} size="lg">
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -474,14 +495,13 @@ export default function Orders() {
                 <option value="">تلقائي (استخدام أحدث فحص للعميل)</option>
                 {customerExams.map((ex) => (
                   <option key={ex.id} value={ex.id}>
-                    فحص بتاريخ {formatDate(ex.exam_date)} — {ex.doctor_name || 'فحص بصريات'}
+                    فحص بتاريخ {formatDate(ex.exam_date || (ex as any).created_at)}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Technical Lens Specifications */}
           <div className="card p-3 bg-slate-50 dark:bg-slate-800/50 space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-brand-600 dark:text-brand-400">
               <Glasses className="w-4 h-4" /> مواصفات العدسات والتصنيع الفني
@@ -524,7 +544,6 @@ export default function Orders() {
             </div>
           </div>
 
-          {/* Items Section */}
           <div>
             <label className="label">عناصر الطلبية (الإطار والعدسات والإكسسوارات)</label>
             <div className="card p-3 bg-slate-50 dark:bg-slate-800/30 space-y-3">
@@ -608,7 +627,6 @@ export default function Orders() {
             </div>
           </div>
 
-          {/* Payments & Notes */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="label">الدفعة المقدمة (المدفوع)</label>
@@ -640,7 +658,7 @@ export default function Orders() {
         </div>
       </Modal>
 
-      {/* View & Print Detailed Receipt Modal */}
+      {/* View & Printable Receipt */}
       <Modal open={!!viewOrder} onClose={() => setViewOrder(null)} title="تفاصيل إيصال وتجهيز الطلب" size="lg">
         {viewOrder && (
           <div>
@@ -650,112 +668,125 @@ export default function Orders() {
               </button>
             </div>
 
+            {/* الإيصال الشامل القابل للطباعة والمعاينة */}
             <div className="printable-receipt border dark:border-slate-700 p-6 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100">
-              <div className="text-center border-b pb-3 mb-4">
-                <h2 className="text-xl font-bold">المركز الإيطالي للبصريات والعيادة الطبية</h2>
+              <div className="text-center border-b border-slate-200 dark:border-slate-700 pb-3 mb-4">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">المركز الإيطالي للبصريات والعيادة الطبية</h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">إيصال طلب وتصنيع نظارة</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs mb-4 bg-slate-50 dark:bg-slate-700/50 p-3 rounded">
+              <div className="grid grid-cols-2 gap-2 text-xs mb-4 bg-slate-50 dark:bg-slate-700/50 p-3 rounded border border-slate-100 dark:border-slate-700">
                 <div>
-                  <span className="text-slate-500">اسم العميل:</span> <strong>{viewOrder.customers?.name || '—'}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">اسم العميل:</span> <strong className="text-slate-900 dark:text-slate-100">{viewOrder.customers?.name || '—'}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500">الهاتف:</span> <strong>{viewOrder.customers?.phone || '—'}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">الهاتف:</span> <strong className="text-slate-900 dark:text-slate-100">{viewOrder.customers?.phone || '—'}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500">رقم الطلبية:</span> <strong>#{viewOrder.id.slice(0, 8)}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">رقم الطلبية:</span> <strong className="text-slate-900 dark:text-slate-100">#{viewOrder.id.slice(0, 8)}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500">تاريخ الطلب:</span> <strong>{formatDate(viewOrder.created_at)}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">تاريخ الطلب:</span> <strong className="text-slate-900 dark:text-slate-100">{formatDate(viewOrder.created_at)}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500">حالة التصنيع:</span> <strong>{ORDER_STATUS_LABELS[viewOrder.status]}</strong>
+                  <span className="text-slate-500 dark:text-slate-400">حالة التصنيع:</span> <strong className="text-slate-900 dark:text-slate-100">{ORDER_STATUS_LABELS[viewOrder.status]}</strong>
                 </div>
               </div>
 
-              {/* Examination Table - تفاصيل الفحص الطبي كاملاً */}
+              {/* قسم الوصفة الطبية (الفحص الكامل) */}
               <div className="mb-4 border border-brand-200 dark:border-brand-900/50 p-3 rounded bg-brand-50/20 dark:bg-brand-950/20">
                 <div className="font-semibold text-brand-700 dark:text-brand-300 mb-2 text-xs flex items-center justify-between">
                   <span className="flex items-center gap-1">
                     <FileText className="w-4 h-4" /> الوصفة الطبية المرفقة (درجات الفحص):
                   </span>
-                  {viewOrder.examination?.exam_date && (
-                    <span className="text-[11px] text-slate-400 font-normal">
-                      بتاريخ: {formatDate(viewOrder.examination.exam_date)}
+                  {viewOrder.examination && (
+                    <span className="text-[11px] text-slate-500 font-normal">
+                      بتاريخ: {formatDate(viewOrder.examination.exam_date || viewOrder.examination.created_at)}
                     </span>
                   )}
                 </div>
 
-                {viewOrder.examination ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-center text-xs border-collapse border border-slate-200 dark:border-slate-700">
-                      <thead>
-                        <tr className="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">العين</th>
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">SPH</th>
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">CYL</th>
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">AXIS</th>
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">ADD</th>
-                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">PD</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5 font-bold">يمين (OD)</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.sph_right ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.cyl_right ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.axis_right ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.add_right ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5" rowSpan={2}>
-                            {viewOrder.examination.pd ?? '—'}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5 font-bold">يسار (OS)</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.sph_left ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.cyl_left ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.axis_left ?? '—'}</td>
-                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.add_left ?? '—'}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 py-1 text-center">
-                    لم يتم العثور على فحص مسجل للعميل.
-                  </p>
-                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-center text-xs border-collapse border border-slate-300 dark:border-slate-700">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">العين</th>
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">SPH</th>
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">CYL</th>
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">AXIS</th>
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">ADD</th>
+                        <th className="border border-slate-300 dark:border-slate-700 p-2 font-bold">PD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2 font-bold">يمين (OD)</td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['sph_right', 'right_sph', 'od_sph']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['cyl_right', 'right_cyl', 'od_cyl']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['axis_right', 'right_axis', 'od_axis']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['add_right', 'right_add', 'od_add']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2 font-bold" rowSpan={2}>
+                          {getVal(viewOrder.examination, ['pd', 'ipd']) ?? '—'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2 font-bold">يسار (OS)</td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['sph_left', 'left_sph', 'os_sph']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['cyl_left', 'left_cyl', 'os_cyl']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['axis_left', 'left_axis', 'os_axis']) ?? '—'}
+                        </td>
+                        <td className="border border-slate-300 dark:border-slate-700 p-2">
+                          {getVal(viewOrder.examination, ['add_left', 'left_add', 'os_add']) ?? '—'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              {/* Order Items Table */}
+              {/* عناصر الأصناف بالنظارة */}
               {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
-                <table className="w-full text-right text-xs mb-4 border-collapse">
+                <table className="w-full text-right text-xs mb-4 border-collapse border border-slate-200 dark:border-slate-700">
                   <thead>
-                    <tr className="border-b text-slate-500">
-                      <th className="py-2">الصنف/العنصر</th>
-                      <th className="py-2 text-center">الكمية</th>
-                      <th className="py-2 text-left">السعر الإجمالي</th>
+                    <tr className="bg-slate-50 dark:bg-slate-700/50 text-slate-700 dark:text-slate-300 border-b">
+                      <th className="p-2 border-b">الصنف/العنصر</th>
+                      <th className="p-2 text-center border-b">الكمية</th>
+                      <th className="p-2 text-left border-b">السعر الإجمالي</th>
                     </tr>
                   </thead>
                   <tbody>
                     {viewOrder.order_items.map((item: any, i: number) => (
                       <tr key={i} className="border-b border-slate-100 dark:border-slate-700">
-                        <td className="py-2">
+                        <td className="p-2 font-medium">
                           {item.item_name} <span className="text-slate-400 text-[10px]">({item.item_type})</span>
                         </td>
-                        <td className="py-2 text-center">{item.quantity}</td>
-                        <td className="py-2 text-left">{formatCurrency(item.line_total)}</td>
+                        <td className="p-2 text-center">{item.quantity}</td>
+                        <td className="p-2 text-left font-bold">{formatCurrency(item.line_total)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               ) : (
-                <p className="text-xs text-slate-400 text-center py-3">لا توجد عناصر مسجلة في هذا الطلب</p>
+                <p className="text-xs text-slate-400 text-center py-2 mb-3 bg-slate-50 dark:bg-slate-800 rounded">
+                  لا توجد عناصر مسجلة في هذا الطلب
+                </p>
               )}
 
-              {/* Financial Calculations */}
-              <div className="border-t pt-3 text-xs space-y-1">
+              {/* الحسابات المادية */}
+              <div className="border-t border-slate-200 dark:border-slate-700 pt-3 text-xs space-y-1.5">
                 <div className="flex justify-between font-bold text-sm">
                   <span>المجموع الكلي:</span>
                   <span>{formatCurrency(viewOrder.total_amount)}</span>
@@ -773,12 +804,12 @@ export default function Orders() {
               </div>
 
               {viewOrder.notes && (
-                <div className="mt-4 pt-2 border-t text-xs text-slate-500">
+                <div className="mt-4 pt-2 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-500">
                   <span className="font-semibold">ملاحظات الطلب:</span> {viewOrder.notes}
                 </div>
               )}
 
-              <div className="text-center text-[10px] text-slate-400 mt-6 border-t pt-2">
+              <div className="text-center text-[10px] text-slate-400 mt-6 border-t border-slate-100 dark:border-slate-700 pt-2">
                 شكراً لزيارتكم - يرجى الاحتفاظ بهذا الإيصال عند استلام النظارة
               </div>
             </div>
@@ -786,35 +817,47 @@ export default function Orders() {
         )}
       </Modal>
 
-      {/* Print Styles */}
+      {/* التنسيقات المخصصة الحاكمة لإجبار الطباعة بكامل المحتوى */}
       <style>{`
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 10mm;
-          }
+          /* إخفاء عناصر الموقع والكونتينر والنافذة العائمة */
           body * {
             visibility: hidden !important;
           }
+          
+          /* توجيه الطباعة بالكامل لإظهار الإيصال فقط */
           .printable-receipt, .printable-receipt * {
             visibility: visible !important;
           }
+
           .printable-receipt {
-            position: absolute !important;
+            position: fixed !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            height: auto !important;
+            padding: 20px !important;
+            margin: 0 !important;
+            background-color: white !important;
+            color: black !important;
             border: none !important;
             box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            background: white !important;
-            color: black !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-          .printable-receipt table th,
-          .printable-receipt table td {
-            border-color: #cbd5e1 !important;
-            color: black !important;
+
+          .printable-receipt table, 
+          .printable-receipt th, 
+          .printable-receipt td {
+            border-color: #000000 !important;
+            color: #000000 !important;
+          }
+
+          .printable-receipt div, 
+          .printable-receipt span, 
+          .printable-receipt p, 
+          .printable-receipt h2 {
+            color: #000000 !important;
           }
         }
       `}</style>
