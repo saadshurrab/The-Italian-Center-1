@@ -25,11 +25,14 @@ interface OrderRecord {
   status: string;
   total_amount?: number;
   total?: number;
-  amount_paid?: number;
-  paid_amount?: number;
-  paid?: number;
   created_at: string;
   customers?: { name: string } | { name: string }[];
+}
+
+interface PaymentRecord {
+  id: string;
+  amount: number;
+  created_at: string;
 }
 
 interface ExpenseRecord {
@@ -61,31 +64,10 @@ export default function Dashboard() {
     { id: string; status: string; total_amount: number; customer_name: string }[]
   >([]);
 
-  // دوال التحقق من التواريخ
+  // دوال معالجة التواريخ بدقة مع UTC/Local
   const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth();
-  const currentDay = now.getDate();
 
-  const isThisMonth = (dateStr?: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
-    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-  };
-
-  const isToday = (dateStr?: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
-    return (
-      d.getFullYear() === currentYear &&
-      d.getMonth() === currentMonth &&
-      d.getDate() === currentDay
-    );
-  };
-
-  const isSameDay = (dateStr: string, targetDate: Date) => {
+  const isSameDay = (dateStr?: string, targetDate: Date = new Date()) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return false;
@@ -96,12 +78,15 @@ export default function Dashboard() {
     );
   };
 
-  const getOrderTotalAmount = (o: OrderRecord) => {
-    return Number(o.total_amount ?? o.total ?? 0);
+  const isThisMonth = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   };
 
-  const getOrderPaidAmount = (o: OrderRecord) => {
-    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
+  const getOrderTotalAmount = (o: OrderRecord) => {
+    return Number(o.total_amount ?? o.total ?? 0);
   };
 
   useEffect(() => {
@@ -111,6 +96,7 @@ export default function Dashboard() {
         const [
           salesRes,
           ordersRes,
+          paymentsRes,
           expensesRes,
           inventoryRes,
           examsRes,
@@ -119,6 +105,7 @@ export default function Dashboard() {
         ] = await Promise.all([
           supabase.from('sales').select('id, total, created_at'),
           supabase.from('orders').select('*, customers(name)'),
+          supabase.from('order_payments').select('id, amount, created_at'),
           supabase.from('expenses').select('*'),
           supabase.from('inventory').select('*'),
           supabase.from('examinations').select('*'),
@@ -128,33 +115,34 @@ export default function Dashboard() {
 
         const sales: SaleRecord[] = salesRes.data || [];
         const orders: OrderRecord[] = ordersRes.data || [];
+        const orderPayments: PaymentRecord[] = paymentsRes.data || [];
         const expenses: ExpenseRecord[] = expensesRes.data || [];
 
         // 1. مبيعات المعرض المباشرة
         const todaySalesDirect = sales
-          .filter((s) => isToday(s.created_at))
+          .filter((s) => isSameDay(s.created_at))
           .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
         const monthSalesDirect = sales
           .filter((s) => isThisMonth(s.created_at))
           .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-        // 2. مدفوعات الطلبيات (نفس آلية المحاسبة تماماً)
-        const todayOrdersPaid = orders
-          .filter((o) => isToday(o.created_at))
-          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
+        // 2. مدفوعات الطلبيات من جدول order_payments الفعلي
+        const todayOrdersPaid = orderPayments
+          .filter((p) => isSameDay(p.created_at))
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-        const monthOrdersPaid = orders
-          .filter((o) => isThisMonth(o.created_at))
-          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
+        const monthOrdersPaid = orderPayments
+          .filter((p) => isThisMonth(p.created_at))
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-        // الإيرادات الإجمالية المقبوضة
+        // إجمالي المقبوضات الفعلي
         const todayRevenue = todaySalesDirect + todayOrdersPaid;
         const monthRevenue = monthSalesDirect + monthOrdersPaid;
 
         // 3. المصروفات
         const todayExpenses = expenses
-          .filter((e) => isToday(e.expense_date || e.created_at))
+          .filter((e) => isSameDay(e.expense_date || e.created_at))
           .reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
         const monthExpenses = expenses
@@ -171,7 +159,7 @@ export default function Dashboard() {
         );
 
         const todayExams = (examsRes.data || []).filter((e) =>
-          isToday(e.exam_date || e.created_at)
+          isSameDay(e.exam_date || e.created_at)
         ).length;
 
         setStats({
@@ -195,9 +183,9 @@ export default function Dashboard() {
             .filter((s) => isSameDay(s.created_at, targetDate))
             .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-          const dayPayments = orders
-            .filter((o) => isSameDay(o.created_at, targetDate))
-            .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
+          const dayPayments = orderPayments
+            .filter((p) => isSameDay(p.created_at, targetDate))
+            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
           daysData.push({
             day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
@@ -206,7 +194,7 @@ export default function Dashboard() {
         }
         setRevenueData(daysData);
 
-        // 6. تجميع المنتجات الأكثر مبيعاً لمنع التكرار
+        // 6. تجميع المنتجات الأكثر مبيعاً حسب الاسم منعاً للتكرار
         const groupedItems: { [key: string]: number } = {};
         (itemsRes.data || []).forEach((item) => {
           const name = item.item_name || 'منتج غير مسمى';
