@@ -25,14 +25,11 @@ interface OrderRecord {
   status: string;
   total_amount?: number;
   total?: number;
+  amount_paid?: number;
+  paid_amount?: number;
+  paid?: number;
   created_at: string;
   customers?: { name: string } | { name: string }[];
-}
-
-interface OrderPaymentRecord {
-  id: string;
-  amount: number;
-  created_at: string;
 }
 
 interface ExpenseRecord {
@@ -103,6 +100,10 @@ export default function Dashboard() {
     return Number(o.total_amount ?? o.total ?? 0);
   };
 
+  const getOrderPaidAmount = (o: OrderRecord) => {
+    return Number(o.amount_paid ?? o.paid_amount ?? o.paid ?? 0);
+  };
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -110,7 +111,6 @@ export default function Dashboard() {
         const [
           salesRes,
           ordersRes,
-          paymentsRes,
           expensesRes,
           inventoryRes,
           examsRes,
@@ -119,21 +119,15 @@ export default function Dashboard() {
         ] = await Promise.all([
           supabase.from('sales').select('id, total, created_at'),
           supabase.from('orders').select('*, customers(name)'),
-          supabase.from('order_payments').select('id, amount, created_at'),
           supabase.from('expenses').select('*'),
           supabase.from('inventory').select('*'),
           supabase.from('examinations').select('*'),
           supabase.from('customers').select('id', { count: 'exact', head: true }),
-          supabase
-            .from('sale_items')
-            .select('item_name, quantity')
-            .order('quantity', { ascending: false })
-            .limit(5),
+          supabase.from('sale_items').select('item_name, quantity'),
         ]);
 
         const sales: SaleRecord[] = salesRes.data || [];
         const orders: OrderRecord[] = ordersRes.data || [];
-        const orderPayments: OrderPaymentRecord[] = paymentsRes.data || [];
         const expenses: ExpenseRecord[] = expensesRes.data || [];
 
         // 1. مبيعات المعرض المباشرة
@@ -145,18 +139,18 @@ export default function Dashboard() {
           .filter((s) => isThisMonth(s.created_at))
           .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-        // 2. مدفوعات ومقدمات الطلبيات المقبوضة من جدول order_payments مباشرة
-        const todayPaymentsTotal = orderPayments
-          .filter((p) => isToday(p.created_at))
-          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        // 2. مدفوعات الطلبيات (نفس آلية المحاسبة تماماً)
+        const todayOrdersPaid = orders
+          .filter((o) => isToday(o.created_at))
+          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        const monthPaymentsTotal = orderPayments
-          .filter((p) => isThisMonth(p.created_at))
-          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const monthOrdersPaid = orders
+          .filter((o) => isThisMonth(o.created_at))
+          .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
-        // الإيرادات الإجمالية المقبوضة = مبيعات المعرض + مدفوعات الطلبيات الفعلية
-        const todayRevenue = todaySalesDirect + todayPaymentsTotal;
-        const monthRevenue = monthSalesDirect + monthPaymentsTotal;
+        // الإيرادات الإجمالية المقبوضة
+        const todayRevenue = todaySalesDirect + todayOrdersPaid;
+        const monthRevenue = monthSalesDirect + monthOrdersPaid;
 
         // 3. المصروفات
         const todayExpenses = expenses
@@ -201,9 +195,9 @@ export default function Dashboard() {
             .filter((s) => isSameDay(s.created_at, targetDate))
             .reduce((sum, s) => sum + Number(s.total || 0), 0);
 
-          const dayPayments = orderPayments
-            .filter((p) => isSameDay(p.created_at, targetDate))
-            .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          const dayPayments = orders
+            .filter((o) => isSameDay(o.created_at, targetDate))
+            .reduce((sum, o) => sum + getOrderPaidAmount(o), 0);
 
           daysData.push({
             day: new Intl.DateTimeFormat('ar', { weekday: 'short' }).format(targetDate),
@@ -212,13 +206,20 @@ export default function Dashboard() {
         }
         setRevenueData(daysData);
 
-        // 6. القوائم الجانبية
-        setTopItems(
-          (itemsRes.data || []).map((i) => ({
-            name: i.item_name,
-            qty: Number(i.quantity) || 0,
-          }))
-        );
+        // 6. تجميع المنتجات الأكثر مبيعاً لمنع التكرار
+        const groupedItems: { [key: string]: number } = {};
+        (itemsRes.data || []).forEach((item) => {
+          const name = item.item_name || 'منتج غير مسمى';
+          const qty = Number(item.quantity) || 0;
+          groupedItems[name] = (groupedItems[name] || 0) + qty;
+        });
+
+        const sortedTopItems = Object.entries(groupedItems)
+          .map(([name, qty]) => ({ name, qty }))
+          .sort((a, b) => b.qty - a.qty)
+          .slice(0, 5);
+
+        setTopItems(sortedTopItems);
 
         setLowStockItems(
           lowStock.slice(0, 5).map((i) => ({
