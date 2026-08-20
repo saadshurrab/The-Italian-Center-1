@@ -28,7 +28,6 @@ import {
 } from '@/lib/supabase';
 import { PageHeader, Modal, Badge, LoadingSpinner, EmptyState } from '@/components/ui';
 
-// تتبع المراحل الكاملة لتصنيع وتسليم النظارة
 const STATUS_FLOW: OrderStatus[] = ['pending', 'in_lab', 'ready', 'delivered'];
 
 const STATUS_ICONS: Record<OrderStatus, typeof Clock> = {
@@ -79,7 +78,7 @@ export default function Orders() {
   const [showModal, setShowModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [viewOrder, setViewOrder] = useState<
-    (Order & { customers?: { name: string; phone?: string }; order_items?: any[]; examination?: Examination }) | null
+    (Order & { customers?: { name: string; phone?: string }; order_items?: any[]; examination?: Examination | null }) | null
   >(null);
 
   const [form, setForm] = useState({ ...emptyForm });
@@ -91,7 +90,6 @@ export default function Orders() {
     notes: '',
   });
 
-  // جلب البيانات مع التفاصيل كاملة
   const fetchOrdersData = async () => {
     try {
       const [ordRes, custRes, examRes, invRes] = await Promise.all([
@@ -133,8 +131,7 @@ export default function Orders() {
   const filtered = orders.filter((o) => {
     const name = o.customers?.name || '';
     const phone = o.customers?.phone || '';
-    const matchSearch =
-      name.toLowerCase().includes(search.toLowerCase()) || phone.includes(search);
+    const matchSearch = name.toLowerCase().includes(search.toLowerCase()) || phone.includes(search);
     const matchStatus = filterStatus === 'all' || o.status === filterStatus;
     return matchSearch && matchStatus;
   });
@@ -220,7 +217,6 @@ export default function Orders() {
         .eq('id', editingOrder.id);
 
       if (error) {
-        console.error('Supabase error details:', error);
         alert('خطأ أثناء التحديث: ' + error.message);
         return;
       }
@@ -228,7 +224,6 @@ export default function Orders() {
     } else {
       const { data, error } = await supabase.from('orders').insert(orderPayload).select().single();
       if (error) {
-        console.error('Supabase error details:', error);
         alert('خطأ أثناء الإنشاء: ' + error.message);
         return;
       }
@@ -246,10 +241,7 @@ export default function Orders() {
         notes: i.notes || null,
       }));
 
-      const { error: itemsError } = await supabase.from('order_items').insert(itemsPayload);
-      if (itemsError) {
-        console.error('Error inserting order items:', itemsError);
-      }
+      await supabase.from('order_items').insert(itemsPayload);
     }
 
     await fetchOrdersData();
@@ -279,16 +271,31 @@ export default function Orders() {
     setOrders((prev) => prev.filter((o) => o.id !== id));
   }
 
+  // دالة عرض تفاصيل الطلب مع جلب الفحص التلقائي للعميل إن لم يربط صراحةً
   async function viewOrderDetails(order: Order & { customers?: { name: string; phone?: string } }) {
-    const [itemsRes, examRes] = await Promise.all([
-      supabase.from('order_items').select('*').eq('order_id', order.id),
-      order.examination_id ? supabase.from('examinations').select('*').eq('id', order.examination_id).single() : Promise.resolve({ data: null }),
-    ]);
+    let examData = null;
+
+    if (order.examination_id) {
+      const { data } = await supabase.from('examinations').select('*').eq('id', order.examination_id).maybeSingle();
+      examData = data;
+    } else if (order.customer_id) {
+      // البحث عن أحدث فحص مسجل للعميل من قائمة الفحوصات
+      const { data } = await supabase
+        .from('examinations')
+        .select('*')
+        .eq('customer_id', order.customer_id)
+        .order('exam_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      examData = data;
+    }
+
+    const { data: items } = await supabase.from('order_items').select('*').eq('order_id', order.id);
 
     setViewOrder({
       ...order,
-      order_items: itemsRes.data || [],
-      examination: examRes.data || undefined,
+      order_items: items || [],
+      examination: examData,
     });
   }
 
@@ -341,7 +348,7 @@ export default function Orders() {
           </div>
         </div>
 
-        {/* Orders grid */}
+        {/* Orders Grid */}
         {filtered.length === 0 ? (
           <div className="card">
             <EmptyState message="لا توجد طلبيات مسجلة حالياً" icon={<ClipboardList className="w-10 h-10" />} />
@@ -464,7 +471,7 @@ export default function Orders() {
                 className="input"
                 disabled={!form.customer_id}
               >
-                <option value="">بدون وصفة طبية مسجلة</option>
+                <option value="">تلقائي (استخدام أحدث فحص للعميل)</option>
                 {customerExams.map((ex) => (
                   <option key={ex.id} value={ex.id}>
                     فحص بتاريخ {formatDate(ex.exam_date)} — {ex.doctor_name || 'فحص بصريات'}
@@ -634,7 +641,7 @@ export default function Orders() {
       </Modal>
 
       {/* View & Print Detailed Receipt Modal */}
-      <Modal open={!!viewOrder} onClose={() => setViewOrder(null)} title="تفاصيل إيصال وتجهيز الطلب" size="md">
+      <Modal open={!!viewOrder} onClose={() => setViewOrder(null)} title="تفاصيل إيصال وتجهيز الطلب" size="lg">
         {viewOrder && (
           <div>
             <div className="no-print flex justify-end gap-2 mb-4">
@@ -667,18 +674,61 @@ export default function Orders() {
                 </div>
               </div>
 
-              {viewOrder.examination && (
-                <div className="mb-4 border border-brand-200 dark:border-brand-900/50 p-2.5 rounded bg-brand-50/30 dark:bg-brand-950/20 text-xs">
-                  <div className="font-semibold text-brand-700 dark:text-brand-300 mb-1 flex items-center gap-1">
-                    <FileText className="w-3.5 h-3.5" /> الوصفة الطبية المرفقة (الدرجات):
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
-                    <div>يمين (OD): SPH: {viewOrder.examination.sph_right || '0'} | CYL: {viewOrder.examination.cyl_right || '0'} | AXIS: {viewOrder.examination.axis_right || '0'}</div>
-                    <div>يسار (OS): SPH: {viewOrder.examination.sph_left || '0'} | CYL: {viewOrder.examination.cyl_left || '0'} | AXIS: {viewOrder.examination.axis_left || '0'}</div>
-                  </div>
+              {/* Examination Table - تفاصيل الفحص الطبي كاملاً */}
+              <div className="mb-4 border border-brand-200 dark:border-brand-900/50 p-3 rounded bg-brand-50/20 dark:bg-brand-950/20">
+                <div className="font-semibold text-brand-700 dark:text-brand-300 mb-2 text-xs flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <FileText className="w-4 h-4" /> الوصفة الطبية المرفقة (درجات الفحص):
+                  </span>
+                  {viewOrder.examination?.exam_date && (
+                    <span className="text-[11px] text-slate-400 font-normal">
+                      بتاريخ: {formatDate(viewOrder.examination.exam_date)}
+                    </span>
+                  )}
                 </div>
-              )}
 
+                {viewOrder.examination ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-center text-xs border-collapse border border-slate-200 dark:border-slate-700">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">العين</th>
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">SPH</th>
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">CYL</th>
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">AXIS</th>
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">ADD</th>
+                          <th className="border border-slate-200 dark:border-slate-700 p-1.5">PD</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5 font-bold">يمين (OD)</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.sph_right ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.cyl_right ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.axis_right ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.add_right ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5" rowSpan={2}>
+                            {viewOrder.examination.pd ?? '—'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5 font-bold">يسار (OS)</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.sph_left ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.cyl_left ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.axis_left ?? '—'}</td>
+                          <td className="border border-slate-200 dark:border-slate-700 p-1.5">{viewOrder.examination.add_left ?? '—'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 py-1 text-center">
+                    لم يتم العثور على فحص مسجل للعميل.
+                  </p>
+                )}
+              </div>
+
+              {/* Order Items Table */}
               {viewOrder.order_items && viewOrder.order_items.length > 0 ? (
                 <table className="w-full text-right text-xs mb-4 border-collapse">
                   <thead>
@@ -704,6 +754,7 @@ export default function Orders() {
                 <p className="text-xs text-slate-400 text-center py-3">لا توجد عناصر مسجلة في هذا الطلب</p>
               )}
 
+              {/* Financial Calculations */}
               <div className="border-t pt-3 text-xs space-y-1">
                 <div className="flex justify-between font-bold text-sm">
                   <span>المجموع الكلي:</span>
@@ -735,7 +786,7 @@ export default function Orders() {
         )}
       </Modal>
 
-      {/* CSS Rules for Printing */}
+      {/* Print Styles */}
       <style>{`
         @media print {
           @page {
@@ -758,6 +809,11 @@ export default function Orders() {
             padding: 0 !important;
             margin: 0 !important;
             background: white !important;
+            color: black !important;
+          }
+          .printable-receipt table th,
+          .printable-receipt table td {
+            border-color: #cbd5e1 !important;
             color: black !important;
           }
         }
